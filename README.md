@@ -26,7 +26,7 @@ Puedes empezar vacío o con datos de ejemplo, y cambiar el perfil o activar/desa
 - **Movimientos**: ingresos, gastos y transferencias entre cuentas, con categorías, notas, búsqueda y filtros por tipo, categoría, cuenta y mes. Puedes **duplicar** un movimiento o marcar **Repetir automáticamente** para convertirlo en recurrente.
 - **Recurrentes**: nómina, alquiler, suscripciones, seguros o traspasos con frecuencia semanal, mensual, trimestral o anual. Se apuntan solos cuando llega la fecha (al abrir la app y cada hora mientras el servidor está en marcha). Puedes pausarlos, ponerles fecha de fin o **saltar el próximo**.
 - **Objetivos**: metas de ahorro con cantidad, fecha límite, color e icono. El progreso puede ir por aportaciones manuales o seguir el saldo de una cuenta. Calcula cuánto necesitas apartar al mes.
-- **Inversiones**: acciones, ETF, fondos, cripto y depósitos. Registra compras y ventas (editables desde el historial), opcionalmente cargadas o abonadas en una cuenta; se calculan unidades, precio medio, valor actual, ganancia latente y ganancia realizada.
+- **Inversiones**: acciones, ETF, fondos indexados, cripto y depósitos. Las que cotizan se buscan por nombre, ticker o ISIN y se valoran con el **precio real del mercado** (variación del día y gráfico de 3 meses). Cada compra o venta se comprueba con el precio de ese día y se indica si compraste tras una subida o una caída. Se calculan unidades, precio medio, valor actual, ganancia latente y ganancia realizada.
 - **Préstamos e hipotecas**: capital, TIN, plazo y fecha de la primera cuota. Calcula la cuota (sistema francés), el capital pendiente, los intereses pagados y por pagar, la fecha de fin y el cuadro de amortización (por años o meses, exportable a CSV). Simulador de **amortización anticipada** (reducir plazo o reducir cuota) con el ahorro en intereses. La cuota puede apuntarse sola en Recurrentes y la deuda se resta del patrimonio neto.
 - **Cuentas**: saldo calculado automáticamente (saldo inicial + ingresos − gastos ± transferencias).
 - **Presupuestos**: límite mensual por categoría con progreso y disponible.
@@ -88,9 +88,17 @@ La app no envía nada a Internet. No hay analítica, ni CDN, ni fuentes externas
 - **Combinar**: une los datos. Si algo se cambió en los dos sitios gana el cambio más reciente, lo que borraste se queda borrado y los recurrentes no se duplican.
 - **Reemplazar todo**: para cambiar de ordenador.
 
-### Cotizaciones
+### Precios de mercado
 
-Añade el **símbolo de cotización** a cada inversión (`IWDA.AS`, `AAPL`, `SAN.MC`, `BTC-EUR`…) y pulsa **Cotizaciones** en Inversiones, o activa **Precios automáticos** en Ajustes (una vez al día). La versión local usa Yahoo Finance y convierte a tu moneda; la versión web solo puede consultar criptomonedas (CoinGecko), porque las bolsas no permiten peticiones desde el navegador.
+- Acciones, ETF, fondos indexados y cripto se buscan en el mercado al crearlas (por nombre, ticker como `IWDA.AS` o `AAPL`, o ISIN como `IE00B03HD191`). El valor de la cartera sale siempre del precio real, no de lo que escribas. Los depósitos y «Otro» siguen siendo manuales.
+- Fuente: Yahoo Finance, con su retraso habitual (unos 15 minutos en bolsa; los fondos publican un valor liquidativo al día). Lo que cotiza en otra moneda se convierte al cambio del día. Los precios se actualizan cada 15 minutos con la app abierta (se puede desactivar en Ajustes).
+- **Compras y ventas comprobadas**: al elegir la fecha se consulta el cierre de ese día y se usa como precio. Si tu bróker te dio otro precio, marca «precio de ejecución»: se acepta si cabe en el rango de ese día (mínimo y máximo, con un margen del 1,5 %). Si no, no se guarda.
+- **Contexto de cada compra**: variación de ese día y del mes anterior («compraste tras una caída del 8 %…») y cuánto ha cambiado el precio desde entonces.
+- Las operaciones de versiones anteriores se contrastan solas y, si su precio no encaja con el mercado, se marcan con un aviso y un botón para corregirlo.
+- Sin conexión con el mercado puedes guardar el precio de tu bróker: queda como «pendiente de comprobar» y se contrasta en la siguiente actualización.
+- Solo se envía el símbolo y la fecha, nunca importes ni datos personales. Es información orientativa, no asesoramiento financiero.
+
+**En la versión web** Yahoo no permite consultas directas desde el navegador, así que pasan por un intermediario público (allorigins o codetabs). Si fallan a menudo, crea el tuyo gratis en Cloudflare Workers con `tools/cloudflare-worker.js` y pega su dirección en **Ajustes → Cotizaciones → Intermediario propio**. La versión local consulta Yahoo directamente.
 
 ## PIN y seguridad
 
@@ -135,6 +143,8 @@ public/index.html      interfaz
 public/styles.css      estilos (claro/oscuro, móvil)
 public/app.js          lógica y vistas
 public/fiscal.js       IVA, IRPF, NIF, modelos 303/130 y cuota de autónomos
+public/glyphs.js       iconos de línea (categorías y objetivos)
+tools/cloudflare-worker.js intermediario propio para las cotizaciones de la versión web
 public/sw.js           caché offline del shell
 public/vendor/qrcode.js generador de QR (MIT, Kazuhiko Arase), incluido en local
 permitir-movil.bat     abre el puerto en el cortafuegos de Windows (redes privadas)
@@ -155,6 +165,12 @@ Los que antes había que resolver a mano ya los resuelve la app:
 - **El navegador muestra datos antiguos**: el service worker ya no reutiliza archivos guardados por el navegador, la app detecta si el servidor tiene una versión más nueva y se recarga sola, y los datos se refrescan al volver a la pestaña. Si aun así ves algo raro: **Ajustes → Forzar actualización**.
 - **Restaurar una copia**: **Ajustes → Datos → Copias automáticas → Restaurar**. Antes se guarda una copia de lo que tienes ahora, así que se puede deshacer.
 - **Cambiar de ordenador**: **Ajustes → Sincronización cifrada → Crear** en el antiguo y **Abrir → Reemplazar todo** en el nuevo (o copia la carpeta `data/`).
+
+## Novedades de la 1.5
+
+- Inversiones con **precio real del mercado**: búsqueda por nombre, ticker o ISIN, variación del día, gráfico y actualización automática.
+- Cada compra o venta se **comprueba con el precio de ese día**; ya no se puede apuntar un precio imposible. Muestra si compraste tras una subida o una caída y cómo ha ido desde entonces.
+- Fuera los emojis: categorías, objetivos y avisos usan **iconos de línea** coherentes con el resto de la app. Los datos existentes se convierten solos.
 
 ## Novedades de la 1.4
 
