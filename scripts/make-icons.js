@@ -56,9 +56,10 @@ function insideRoundRect(x, y, rx, ry, w, h, radius) {
   return dx * dx + dy * dy <= radius * radius;
 }
 
-const BG_START = [24, 185, 129];
-const BG_END = [8, 74, 55];
-const BAR = [234, 255, 247];
+// Estilo sobrio: fondo tinta plano, dos barras claras y la tercera en verde pino suave.
+const BG_START = [28, 28, 30];
+const BG_END = [28, 28, 30];
+const BARS = [[245, 245, 247], [245, 245, 247], [134, 187, 168]];
 
 function render(size, maskable) {
   const SS = 4;
@@ -71,7 +72,7 @@ function render(size, maskable) {
   const heights = [W * (92 / 512), W * (152 / 512), W * (222 / 512)];
   const baseY = W * (392 / 512);
   const radius = barW / 2;
-  const opacities = [0.72, 0.88, 1];
+  const opacities = [0.45, 0.72, 1];
 
   for (let y = 0; y < W; y += 1) {
     for (let x = 0; x < W; x += 1) {
@@ -87,6 +88,7 @@ function render(size, maskable) {
         const bx = startX + i * (barW + gap);
         const by = baseY - heights[i];
         if (insideRoundRect(x, y, bx, by, barW, heights[i], radius)) {
+          const BAR = BARS[i];
           r = BAR[0] * opacities[i] + r * (1 - opacities[i]);
           g = BAR[1] * opacities[i] + g * (1 - opacities[i]);
           b = BAR[2] * opacities[i] + b * (1 - opacities[i]);

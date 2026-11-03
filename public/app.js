@@ -10,16 +10,44 @@ const ACCOUNT_TYPES = {
   card: 'Tarjeta', broker: 'Broker', other: 'Otra'
 };
 const INVEST_TYPES = {
-  stock: { label: 'Acciones', color: '#3b82f6' },
-  etf: { label: 'ETF', color: '#14b8a6' },
-  fund: { label: 'Fondo', color: '#8b5cf6' },
-  crypto: { label: 'Cripto', color: '#f59e0b' },
-  deposit: { label: 'Depósito', color: '#64748b' },
-  other: { label: 'Otro', color: '#94a3b8' }
+  stock: { label: 'Acciones', color: '#5d7a96' },
+  etf: { label: 'ETF', color: '#4f8676' },
+  fund: { label: 'Fondo', color: '#9a8466' },
+  crypto: { label: 'Cripto', color: '#c19a52' },
+  deposit: { label: 'Depósito', color: '#7c848d' },
+  other: { label: 'Otro', color: '#aab0b6' }
 };
 const TX_LABELS = { income: 'Ingreso', expense: 'Gasto', transfer: 'Transferencia' };
 const EMOJIS = ['🏠', '🛒', '🚗', '🍽️', '💊', '🎬', '🛍️', '📺', '📚', '✈️', '🐾', '🧾', '📦', '💼', '🧑‍💻', '📈', '🏦', '🏷️', '🎁', '➕', '⚡', '🎵', '🏋️', '☕', '🎓', '🔧'];
 const PALETTE = ['#0e9f6e', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16', '#64748b', '#f97316'];
+/* Colores de categoría en pantalla: se apagan (baja saturación) y los violetas y rosas quedan casi grises.
+   Los datos guardados no cambian. */
+const TONE_CACHE = new Map();
+function tone(hex) {
+  if (typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+  if (TONE_CACHE.has(hex)) return TONE_CACHE.get(hex);
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, sat = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    sat = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h *= 60;
+  }
+  // violetas y rosas: casi grises (malva y rosa empolvado) para no parecer una app cripto
+  const cap = h >= 228 && h < 345 ? 0.16 : 0.3;
+  const s2 = Math.min(sat, cap) * (sat > 0.05 ? 1 : 0);
+  const l2 = Math.min(0.58, Math.max(0.44, l));
+  const k = (m) => (m + h / 30) % 12;
+  const a = s2 * Math.min(l2, 1 - l2);
+  const f = (m) => l2 - a * Math.max(-1, Math.min(k(m) - 3, Math.min(9 - k(m), 1)));
+  const out = '#' + [f(0), f(8), f(4)].map((v) => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+  TONE_CACHE.set(hex, out);
+  return out;
+}
 const NAV = [
   { id: 'resumen', label: 'Resumen', icon: 'home' },
   { id: 'movimientos', label: 'Movimientos', icon: 'list' },
@@ -293,7 +321,7 @@ function spendingByCategory(key) {
       const cat = categoryById(id);
       return {
         id, value: round(value),
-        name: cat?.name || 'Otros', icon: cat?.icon || '📦', color: cat?.color || '#94a3b8'
+        name: cat?.name || 'Otros', icon: cat?.icon || '📦', color: tone(cat?.color || '#94a3b8')
       };
     })
     .sort((a, b) => b.value - a.value);
@@ -331,7 +359,7 @@ function txMeta(tx) {
   return `${from}${tx.recurringId ? ' · fijo' : ''}${tx.note ? ' · ' + tx.note : ''}`;
 }
 function txIconColor(tx) {
-  if (tx.type === 'transfer') return { icon: 'transfer', bg: '#6d4aff', emoji: false };
+  if (tx.type === 'transfer') return { icon: 'transfer', bg: '#6b7280', emoji: false };
   const cat = categoryById(tx.categoryId);
   return { icon: cat?.icon || '📦', bg: cat?.color || '#94a3b8', emoji: true };
 }
@@ -348,7 +376,7 @@ function applyTheme() {
   const theme = resolvedTheme();
   document.documentElement.dataset.theme = theme;
   const meta = document.getElementById('metaTheme');
-  if (meta) meta.content = theme === 'dark' ? '#0a0f0d' : '#f3f6f4';
+  if (meta) meta.content = theme === 'dark' ? '#000000' : '#f4f4f2';
   for (const el of $$('[data-theme-icon]')) {
     el.innerHTML = icon(theme === 'dark' ? 'sun' : 'moon', 18);
   }
@@ -467,6 +495,7 @@ function render() {
   const host = document.getElementById('view');
   host.innerHTML = VIEWS[view] ? VIEWS[view]() : '';
   if (view === 'movimientos') renderTxList();
+  updateIsland();
   const foot = document.getElementById('footInfo');
   if (foot) foot.textContent = `${store.data.transactions.length} movimientos · rev ${store.data.rev}`;
   document.body.classList.toggle('is-offline', store.offline);
@@ -647,7 +676,7 @@ function donutChart(rows, total) {
     const pct = total > 0 ? seg.value / total : 0;
     const len = Math.max(0, pct * c - 3);
     if (len > 0) {
-      svg += `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${seg.color}" stroke-width="${stroke}" stroke-linecap="butt" stroke-dasharray="${len.toFixed(2)} ${(c - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 ${cx} ${cx})"/>`;
+      svg += `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="${tone(seg.color)}" stroke-width="${stroke}" stroke-linecap="butt" stroke-dasharray="${len.toFixed(2)} ${(c - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 ${cx} ${cx})"/>`;
     }
     offset += pct * c;
   }
@@ -657,7 +686,7 @@ function donutChart(rows, total) {
   svg += '</svg>';
   const legend = segments.map((seg) => `
     <div class="donut-row">
-      <span class="donut-dot" style="background:${seg.color}"></span>
+      <span class="donut-dot" style="background:${tone(seg.color)}"></span>
       <span class="donut-name">${esc(seg.name)}</span>
       <b>${esc(money(seg.value, { decimals: 0 }))}</b>
     </div>`).join('');
@@ -679,10 +708,52 @@ function savingsSpark() {
   return {
     total: running,
     svg: `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ahorro acumulado en 12 meses">
-      <path d="${area}" fill="rgba(255,255,255,.13)"/>
-      <path d="${line}" fill="none" stroke="#c9ffec" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="${area}" fill="var(--accent)" fill-opacity=".08"/>
+      <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
     </svg></div>`
   };
+}
+
+function bigMoney(value) {
+  const text = money(value);
+  const m = text.match(/^(.*?)([.,]\d{1,2})(\s?[^\d\s]*)$/);
+  if (!m) return esc(text);
+  return `<span class="fig-int">${esc(m[1])}</span><span class="fig-dec">${esc(m[2] + m[3])}</span>`;
+}
+function longToday() {
+  return new Date().toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' });
+}
+function compositionBar(cash, invested) {
+  const total = Math.max(0, cash) + Math.max(0, invested);
+  if (total <= 0) return '';
+  const c = (Math.max(0, cash) / total) * 100;
+  return `<div class="composition" role="img" aria-label="Efectivo ${percent(c / 100, 0)}, invertido ${percent(1 - c / 100, 0)}"><i class="cash" style="width:${c.toFixed(2)}%"></i><i class="inv" style="width:${(100 - c).toFixed(2)}%"></i></div>`;
+}
+function relativeDay(iso) {
+  const today = todayISO();
+  const diff = Math.round((new Date(iso + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+  if (diff <= 0) return 'hoy';
+  if (diff === 1) return 'mañana';
+  if (diff < 7) return `en ${diff} días`;
+  return new Date(iso + 'T00:00:00').toLocaleDateString(locale(), { day: 'numeric', month: 'short' }).replace('.', '');
+}
+function updateIsland() {
+  const el = document.getElementById('island');
+  if (!el || !store.data) return;
+  const next = upcomingOccurrences(60)[0];
+  if (!next) {
+    el.className = 'island is-idle';
+    el.innerHTML = `<span class="island-dot"></span><span class="island-text">Sin cobros ni pagos próximos</span>`;
+    el.setAttribute('aria-label', 'Sin cobros ni pagos próximos. Ver recurrentes');
+    return;
+  }
+  const r = next.rule;
+  const sign = r.type === 'income' ? '+' : r.type === 'expense' ? '−' : '';
+  const kind = r.type === 'income' ? 'Cobro' : r.type === 'expense' ? 'Pago' : 'Traspaso';
+  const when = relativeDay(next.date);
+  el.className = `island is-${r.type}`;
+  el.innerHTML = `<span class="island-dot"></span><span class="island-text"><span class="island-kind">${kind}</span> ${esc(ruleTitle(r))}</span><span class="island-amt">${sign}${esc(money(r.amount))}</span><span class="island-when">${esc(when)}</span>`;
+  el.setAttribute('aria-label', `Próximo ${kind.toLowerCase()}: ${ruleTitle(r)}, ${sign}${money(r.amount)}, ${when}. Ver recurrentes`);
 }
 
 function deltaBadge(current, previous, invert = false) {
@@ -700,7 +771,7 @@ function statCard(label, value, foot, kind, iconName) {
       <span class="stat-label">${esc(label)}</span>
       <span class="stat-ico ${kind}">${icon(iconName, 16)}</span>
     </div>
-    <div class="stat-value">${esc(value)}</div>
+    <div class="stat-value">${value}</div>
     <div class="stat-foot">${foot}</div>
   </article>`;
 }
@@ -722,7 +793,7 @@ function txRow(tx) {
 function budgetMiniRow(row) {
   const pct = clamp(row.pct, 0, 1);
   return `<div class="budget-row">
-    <span class="budget-icon" style="background:${row.color}1f;color:${row.color}">${esc(row.icon)}</span>
+    <span class="budget-icon" style="background:${tone(row.color)}1f;color:${tone(row.color)}">${esc(row.icon)}</span>
     <div class="budget-info">
       <div class="budget-line"><b>${esc(row.name)}</b><span>${esc(money(row.spent, { decimals: 0 }))} de ${esc(money(row.budget, { decimals: 0 }))}</span></div>
       <div class="progress ${progressClass(row.pct)}"><i style="width:${(pct * 100).toFixed(1)}%"></i></div>
@@ -754,35 +825,36 @@ function viewResumen() {
   ${store.offline ? `<div class="banner">${icon('alert', 17)}<span><b>Sin conexión.</b> Estás viendo la última copia guardada en este dispositivo.</span></div>` : ''}
   <section class="hero">
     <div class="hero-content">
-      <div class="hero-label">Patrimonio neto</div>
-      <div class="hero-value">${esc(money(worth))}</div>
+      <div class="hero-label">Patrimonio neto <span>a ${esc(longToday())}</span></div>
+      <div class="hero-value">${bigMoney(worth)}</div>
+      ${compositionBar(cash, portfolio.value)}
       <div class="hero-meta">
-        <span><span class="dot cash"></span>Efectivo ${esc(money(cash))}</span>
-        <span><span class="dot inv"></span>Invertido ${esc(money(portfolio.value))}</span>
+        <span><span class="dot cash"></span>Efectivo <b>${esc(money(cash))}</b></span>
+        <span><span class="dot inv"></span>Invertido <b>${esc(money(portfolio.value))}</b></span>
       </div>
       <div class="hero-actions">
         <button class="btn btn-light" type="button" data-action="new-tx" data-type="expense">${icon('plus', 16)} Añadir movimiento</button>
         <a class="btn btn-outline-light" href="#/inversiones">Ver cartera ${icon('arrowRight', 16)}</a>
       </div>
-      <div class="hero-foot">Actualizado ${esc(new Date().toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }))}</div>
     </div>
     <div class="hero-visual">
-      ${spark.svg}
       <div class="hero-caption"><span>Ahorro acumulado · 12 meses</span><b>${esc(money(spark.total, { decimals: 0 }))}</b></div>
+      ${spark.svg}
+      <div class="hero-foot">Actualizado a las ${esc(new Date().toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }))}</div>
     </div>
   </section>
 
   <div class="statgrid">
-    ${statCard('Ingresos del mes', money(stats.income), `${deltaBadge(stats.income, prev.income)} <span>vs. mes anterior</span>`, 'income', 'arrowUp')}
-    ${statCard('Gastos del mes', money(stats.expense), `${deltaBadge(stats.expense, prev.expense, true)} <span>vs. mes anterior</span>`, 'expense', 'wallet')}
-    ${statCard('Ahorro del mes', money(stats.net), `<span>${esc(percent(stats.rate))} de tus ingresos</span>`, 'net', 'sparkles')}
+    ${statCard('Ingresos del mes', bigMoney(stats.income), `${deltaBadge(stats.income, prev.income)} <span>vs. mes anterior</span>`, 'income', 'arrowUp')}
+    ${statCard('Gastos del mes', bigMoney(stats.expense), `${deltaBadge(stats.expense, prev.expense, true)} <span>vs. mes anterior</span>`, 'expense', 'wallet')}
+    ${statCard('Ahorro del mes', bigMoney(stats.net), `<span>${esc(percent(stats.rate))} de tus ingresos</span>`, 'net', 'sparkles')}
   </div>
 
   <div class="grid-2">
     <section class="card">
       <div class="card-head">
         <div><h2>Flujo mensual</h2><p>Ingresos y gastos de los últimos 6 meses</p></div>
-        <div class="legend"><span><i style="background:var(--accent)"></i>Ingresos</span><span><i style="background:var(--danger)"></i>Gastos</span></div>
+        <div class="legend"><span><i style="background:var(--accent)"></i>Ingresos</span><span><i style="background:var(--chart-2)"></i>Gastos</span></div>
       </div>
       ${barChart(series)}
     </section>
@@ -834,10 +906,10 @@ function viewResumen() {
       </div>
       ${goals.length
         ? goals.slice(0, 4).map((g) => `<button type="button" class="budget-row goal-mini" data-action="edit-goal" data-id="${esc(g.id)}">
-            <span class="budget-icon" style="background:${g.color}1f;color:${g.color}">${esc(g.icon)}</span>
+            <span class="budget-icon" style="background:${tone(g.color)}1f;color:${tone(g.color)}">${esc(g.icon)}</span>
             <div class="budget-info">
               <div class="budget-line"><b>${esc(g.name)}</b><span>${esc(money(g.saved, { decimals: 0 }))} de ${esc(money(g.target, { decimals: 0 }))}</span></div>
-              <div class="progress${g.reached ? ' done' : ''}"><i style="width:${(clamp(g.pct, 0, 1) * 100).toFixed(1)}%;background:${g.color}"></i></div>
+              <div class="progress${g.reached ? ' done' : ''}"><i style="width:${(clamp(g.pct, 0, 1) * 100).toFixed(1)}%;background:${tone(g.color)}"></i></div>
             </div>
             <span class="budget-amount"><b>${esc(percent(g.pct, 0))}</b>${g.reached ? 'conseguido' : g.perMonth ? esc(money(g.perMonth, { decimals: 0 })) + '/mes' : 'progreso'}</span>
           </button>`).join('')
@@ -1060,7 +1132,7 @@ function viewInversiones() {
   <section class="hero hero--invest">
     <div class="hero-content">
       <div class="hero-label">Valor actual de la cartera</div>
-      <div class="hero-value">${esc(money(totals.value))}</div>
+      <div class="hero-value">${bigMoney(totals.value)}</div>
       <span class="pnl ${up ? 'up' : 'down'}">${icon(up ? 'arrowUpRight' : 'arrowDown', 14)}${up ? '+' : ''}${esc(money(totals.pnl))} no realizado · ${esc(percent(totals.pnlPct))}</span>
       <div class="portfolio-stats">
         <div class="portfolio-stat"><span>Aportado</span><b>${esc(money(totals.cost))}</b></div>
@@ -1109,13 +1181,13 @@ function viewCuentas() {
   </div>
 
   <div class="statgrid">
-    ${statCard('Efectivo disponible', money(cash), '<span>Suma de todas tus cuentas</span>', 'income', 'wallet')}
-    ${statCard('Invertido', money(portfolio.value), `<span>${esc(percent(portfolio.pnlPct))} de rentabilidad latente</span>`, 'net', 'trend')}
-    ${statCard('Patrimonio neto', money(cash + portfolio.value), '<span>Efectivo + valor de la cartera</span>', 'net', 'coins')}
+    ${statCard('Efectivo disponible', bigMoney(cash), '<span>Suma de todas tus cuentas</span>', 'income', 'wallet')}
+    ${statCard('Invertido', bigMoney(portfolio.value), `<span>${esc(percent(portfolio.pnlPct))} de rentabilidad latente</span>`, 'net', 'trend')}
+    ${statCard('Patrimonio neto', bigMoney(cash + portfolio.value), '<span>Efectivo + valor de la cartera</span>', 'net', 'coins')}
   </div>
 
   ${accounts.length ? `<div class="account-grid">
-    ${accounts.map((a) => `<button type="button" class="card account-card" style="--c:${a.color}" data-action="edit-account" data-id="${esc(a.id)}">
+    ${accounts.map((a) => `<button type="button" class="card account-card" style="--c:${tone(a.color)}" data-action="edit-account" data-id="${esc(a.id)}">
       <div class="acct-top">
         <span class="acct-type">${esc(ACCOUNT_TYPES[a.type] || 'Cuenta')}</span>
         <span class="badge">${icon('wallet', 12)} editar</span>
@@ -1179,7 +1251,7 @@ function viewPresupuestos() {
     ${rows.length ? rows.map((row) => {
       const hasBudget = row.budget > 0;
       return `<div class="budget-row">
-        <span class="budget-icon" style="background:${row.color}1f;color:${row.color}">${esc(row.icon)}</span>
+        <span class="budget-icon" style="background:${tone(row.color)}1f;color:${tone(row.color)}">${esc(row.icon)}</span>
         <div class="budget-info">
           <div class="budget-line"><b>${esc(row.name)}</b><span>${hasBudget ? `${esc(money(row.spent, { decimals: 0 }))} de ${esc(money(row.budget, { decimals: 0 }))}` : `${esc(money(row.spent, { decimals: 0 }))} gastados · sin límite`}</span></div>
           ${hasBudget ? `<div class="progress ${progressClass(row.pct)}"><i style="width:${(clamp(row.pct, 0, 1) * 100).toFixed(1)}%"></i></div>` : ''}
@@ -1244,7 +1316,7 @@ function ruleMeta(rule) {
   return `${FREQ_LABELS[rule.frequency] || ''} · ${cat}`;
 }
 function ruleVisual(rule) {
-  if (rule.type === 'transfer') return { emoji: false, icon: 'transfer', bg: '#6d4aff' };
+  if (rule.type === 'transfer') return { emoji: false, icon: 'transfer', bg: '#6b7280' };
   const cat = categoryById(rule.categoryId);
   return { emoji: true, icon: cat?.icon || '📦', bg: cat?.color || '#94a3b8' };
 }
@@ -1286,9 +1358,9 @@ function viewRecurrentes() {
   </div>
 
   <div class="statgrid">
-    ${statCard('Ingresos fijos / mes', money(totals.income), '<span>Equivalente mensual</span>', 'income', 'arrowUp')}
-    ${statCard('Gastos fijos / mes', money(totals.expense), `<span>${totals.income > 0 ? esc(percent(totals.expense / totals.income)) + ' de tus ingresos fijos' : 'Equivalente mensual'}</span>`, 'expense', 'repeat')}
-    ${statCard('Margen libre / mes', money(totals.free), `<span>${totals.transfer > 0 ? esc(money(totals.transfer, { decimals: 0 })) + ' en traspasos automáticos' : 'Lo que queda tras lo fijo'}</span>`, 'net', 'sparkles')}
+    ${statCard('Ingresos fijos / mes', bigMoney(totals.income), '<span>Equivalente mensual</span>', 'income', 'arrowUp')}
+    ${statCard('Gastos fijos / mes', bigMoney(totals.expense), `<span>${totals.income > 0 ? esc(percent(totals.expense / totals.income)) + ' de tus ingresos fijos' : 'Equivalente mensual'}</span>`, 'expense', 'repeat')}
+    ${statCard('Margen libre / mes', bigMoney(totals.free), `<span>${totals.transfer > 0 ? esc(money(totals.transfer, { decimals: 0 })) + ' en traspasos automáticos' : 'Lo que queda tras lo fijo'}</span>`, 'net', 'sparkles')}
   </div>
 
   ${rules.length ? `<div class="grid-2 grid-2--wide-left">
@@ -1338,7 +1410,7 @@ function goalCard(g) {
   const deadlineText = g.deadline
     ? (g.reached ? 'Conseguido' : g.monthsLeft === 0 ? `Vence ${dateLabel(g.deadline).toLowerCase()}` : `${g.monthsLeft} ${g.monthsLeft === 1 ? 'mes' : 'meses'} · ${money(g.perMonth, { decimals: 0 })}/mes`)
     : (g.reached ? 'Conseguido' : 'Sin fecha límite');
-  return `<article class="card goal" style="--c:${g.color}">
+  return `<article class="card goal" style="--c:${tone(g.color)}">
     <div class="goal-head">
       <span class="goal-icon">${esc(g.icon)}</span>
       <div class="goal-title"><h3>${esc(g.name)}</h3><span>${g.account ? 'Saldo de ' + esc(g.account.name) : 'Aportaciones manuales'}</span></div>
@@ -1369,9 +1441,9 @@ function viewObjetivos() {
   </div>
   ${goals.length ? `
   <div class="statgrid">
-    ${statCard('Ahorrado para objetivos', money(totalSaved), `<span>${esc(percent(totalTarget > 0 ? totalSaved / totalTarget : 0, 0))} del total</span>`, 'income', 'flag')}
-    ${statCard('Meta total', money(totalTarget), `<span>${goals.length} ${goals.length === 1 ? 'objetivo' : 'objetivos'} · ${goals.filter((g) => g.reached).length} conseguidos</span>`, 'net', 'target')}
-    ${statCard('Necesitas apartar', money(perMonth), '<span>Al mes para llegar a tiempo</span>', 'expense', 'calendar')}
+    ${statCard('Ahorrado para objetivos', bigMoney(totalSaved), `<span>${esc(percent(totalTarget > 0 ? totalSaved / totalTarget : 0, 0))} del total</span>`, 'income', 'flag')}
+    ${statCard('Meta total', bigMoney(totalTarget), `<span>${goals.length} ${goals.length === 1 ? 'objetivo' : 'objetivos'} · ${goals.filter((g) => g.reached).length} conseguidos</span>`, 'net', 'target')}
+    ${statCard('Necesitas apartar', bigMoney(perMonth), '<span>Al mes para llegar a tiempo</span>', 'expense', 'calendar')}
   </div>
   <div class="goal-grid">${goals.map(goalCard).join('')}</div>` : `<section class="card"><div class="empty">
     <span class="empty-icon">🎯</span>
@@ -1510,16 +1582,16 @@ function viewInformes() {
   </div>
 
   <div class="statgrid">
-    ${statCard('Ingresos del año', money(income), `${deltaBadge(income, prevIncome)} <span>vs. ${year - 1}</span>`, 'income', 'arrowUp')}
-    ${statCard('Gastos del año', money(expense), `${deltaBadge(expense, prevExpense, true)} <span>vs. ${year - 1}</span>`, 'expense', 'wallet')}
-    ${statCard('Ahorro del año', money(net), `<span>${esc(percent(income > 0 ? net / income : 0))} de tus ingresos · ${esc(money(net / divisor, { decimals: 0 }))}/mes</span>`, 'net', 'sparkles')}
+    ${statCard('Ingresos del año', bigMoney(income), `${deltaBadge(income, prevIncome)} <span>vs. ${year - 1}</span>`, 'income', 'arrowUp')}
+    ${statCard('Gastos del año', bigMoney(expense), `${deltaBadge(expense, prevExpense, true)} <span>vs. ${year - 1}</span>`, 'expense', 'wallet')}
+    ${statCard('Ahorro del año', bigMoney(net), `<span>${esc(percent(income > 0 ? net / income : 0))} de tus ingresos · ${esc(money(net / divisor, { decimals: 0 }))}/mes</span>`, 'net', 'sparkles')}
   </div>
 
   <div class="grid-2">
     <section class="card">
       <div class="card-head">
         <div><h2>Ingresos y gastos</h2><p>Mes a mes en ${year}</p></div>
-        <div class="legend"><span><i style="background:var(--accent)"></i>Ingresos</span><span><i style="background:var(--danger)"></i>Gastos</span></div>
+        <div class="legend"><span><i style="background:var(--accent)"></i>Ingresos</span><span><i style="background:var(--chart-2)"></i>Gastos</span></div>
       </div>
       ${barChart(months)}
     </section>
@@ -1571,10 +1643,10 @@ function viewInformes() {
 function catBarRow(r, divisor) {
   const cat = r.cat || { icon: '📦', name: 'Otros', color: '#94a3b8' };
   return `<div class="budget-row">
-    <span class="budget-icon" style="background:${cat.color}1f;color:${cat.color}">${esc(cat.icon)}</span>
+    <span class="budget-icon" style="background:${tone(cat.color)}1f;color:${tone(cat.color)}">${esc(cat.icon)}</span>
     <div class="budget-info">
       <div class="budget-line"><b>${esc(cat.name)}</b><span>${esc(percent(r.share, 0))} · ${esc(money(r.value / divisor, { decimals: 0 }))}/mes</span></div>
-      <div class="progress"><i style="width:${(clamp(r.share, 0, 1) * 100).toFixed(1)}%;background:${cat.color}"></i></div>
+      <div class="progress"><i style="width:${(clamp(r.share, 0, 1) * 100).toFixed(1)}%;background:${tone(cat.color)}"></i></div>
     </div>
     <span class="budget-amount"><b>${esc(money(r.value, { decimals: 0 }))}</b>en el año</span>
   </div>`;
@@ -1634,7 +1706,7 @@ function categoryGroups() {
       <h3>${kind === 'expense' ? 'Gastos' : 'Ingresos'}</h3>
       <div class="cat-list">
         ${list.map((c) => `<button type="button" class="cat-item" data-action="edit-category" data-id="${esc(c.id)}">
-          <span class="cat-emoji" style="background:${c.color}1f">${esc(c.icon)}</span>
+          <span class="cat-emoji" style="background:${tone(c.color)}1f">${esc(c.icon)}</span>
           <span class="cat-name">${esc(c.name)}</span>
           ${kind === 'expense' ? `<span class="cat-budget">${c.budget > 0 ? esc(money(c.budget, { decimals: 0 })) : 'sin límite'}</span>` : ''}
         </button>`).join('')}
@@ -1863,7 +1935,7 @@ function confirmDialog({ title, message, confirm = 'Eliminar', danger = true }) 
 }
 
 function swatchesHTML(selected) {
-  return `<div class="swatches">${PALETTE.map((color) => `<label class="swatch" style="--c:${color}" title="${color}">
+  return `<div class="swatches">${PALETTE.map((color) => `<label class="swatch" style="--c:${tone(color)}" title="${color}">
     <input type="radio" name="color" value="${color}"${selected === color ? ' checked' : ''}><span></span>
   </label>`).join('')}</div>`;
 }

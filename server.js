@@ -13,7 +13,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const PORT = Number(process.env.PORT) || 4321;
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
