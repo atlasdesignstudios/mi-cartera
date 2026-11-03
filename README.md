@@ -31,6 +31,15 @@ Se abre el navegador en `http://localhost:4321`. Para detenerlo, `Ctrl+C` o cier
 
 > No hace falta `npm install`. La app no usa paquetes externos.
 
+## Versión web (GitHub Pages)
+
+Puedes abrirla como página web en **https://atlasdesignstudios.github.io/mi-cartera/**.
+
+- No necesita servidor: la misma lógica de `server.js` se ejecuta dentro del navegador y los datos se guardan en su `localStorage`. **No se envían a ningún sitio**, ni siquiera a GitHub.
+- Cada navegador y dispositivo tiene sus propios datos. La primera visita carga datos de ejemplo; usa **Ajustes → Borrar todo** para empezar de cero.
+- Si borras los datos del navegador, se pierden: usa **Exportar** a menudo. Las copias son compatibles con la versión local (puedes pasar datos de una a otra con Exportar/Importar).
+- Se publica sola con cada `push` a `main` (`.github/workflows/pages.yml`). Para generarla a mano: `node scripts/build-web.js` (crea `dist/`).
+
 ## Usarla desde el móvil
 
 1. Arranca el servidor en el ordenador.
@@ -82,6 +91,8 @@ public/app.js          lógica y vistas
 public/sw.js           caché offline del shell
 public/icons/          iconos
 scripts/make-icons.js  regenera los PNG (opcional)
+scripts/build-web.js   genera la versión web estática en dist/
+.github/workflows/     publicación automática en GitHub Pages
 data/db.json           tus datos (se crea al arrancar)
 data/backups/          copias diarias
 ```

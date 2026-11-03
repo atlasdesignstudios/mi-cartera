@@ -2,6 +2,8 @@
 'use strict';
 
 const STORAGE_KEY = 'micartera.state.v1';
+// En la versión web (GitHub Pages) no hay servidor: los datos viven en este navegador.
+const WEB = Boolean(globalThis.MC_WEB);
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'MXN', 'ARS', 'COP', 'CLP', 'PEN', 'BRL', 'UYU', 'JPY'];
 const ACCOUNT_TYPES = {
   bank: 'Cuenta bancaria', savings: 'Ahorro', cash: 'Efectivo',
@@ -357,7 +359,7 @@ function applyTheme() {
 function setTheme(theme) {
   if (store.data) store.data.settings.theme = theme;
   applyTheme();
-  api('PATCH', '/api/settings', { theme }).catch((err) => toast(err.message, 'error'));
+  api('PATCH', 'api/settings', { theme }).catch((err) => toast(err.message, 'error'));
 }
 function toggleTheme() {
   setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark');
@@ -403,7 +405,7 @@ async function api(method, path, body) {
   return data;
 }
 async function loadState() {
-  const response = await fetch('/api/state', { credentials: 'same-origin' });
+  const response = await fetch('api/state', { credentials: 'same-origin' });
   if (response.status === 401) { showLock(); throw new Error('Bloqueado'); }
   if (!response.ok) throw new Error('No se pudieron cargar los datos.');
   const data = await response.json();
@@ -482,6 +484,12 @@ function hideBoot() {
 function showApp() {
   const app = document.getElementById('app');
   if (app) app.hidden = false;
+  if (WEB) {
+    const chip = document.querySelector('.local-chip');
+    if (chip) chip.innerHTML = '<span class="pulse"></span> Datos solo en este navegador';
+    const foot = [...document.querySelectorAll('span')].find((el) => el.textContent.includes('tus datos no salen de tu ordenador'));
+    if (foot) foot.textContent = 'Mi Cartera · versión web · tus datos no salen de este navegador';
+  }
 }
 function showLock() {
   const app = document.getElementById('app');
@@ -516,7 +524,7 @@ async function unlock(event) {
   if (error) error.hidden = true;
   try {
     if (button) button.disabled = true;
-    const response = await fetch('/api/login', {
+    const response = await fetch('api/login', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: input?.value || '' })
@@ -545,7 +553,7 @@ function startPolling() {
   startPolling.timer = setInterval(async () => {
     if (document.hidden || !store.data) return;
     try {
-      const response = await fetch('/api/state', { credentials: 'same-origin' });
+      const response = await fetch('api/state', { credentials: 'same-origin' });
       if (response.status === 401) { showLock(); return; }
       if (!response.ok) return;
       const data = await response.json();
@@ -561,7 +569,7 @@ async function boot() {
   document.getElementById('lockForm')?.addEventListener('submit', unlock);
   let bootFailed = false;
   try {
-    const response = await fetch('/api/session', { credentials: 'same-origin' });
+    const response = await fetch('api/session', { credentials: 'same-origin' });
     if (!response.ok) throw new Error('No se pudo iniciar la aplicación.');
     store.session = await response.json();
     if (store.session.locked) {
@@ -573,7 +581,7 @@ async function boot() {
     render();
     startPolling();
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker.register('sw.js').catch(() => {});
     }
   } catch (err) {
     if (!document.getElementById('lock')?.hidden) return;
@@ -1643,7 +1651,7 @@ function viewAjustes() {
   const dataDir = store.session?.dataDir || '';
   return `
   <div class="viewhead">
-    <div><h1>Ajustes</h1><p>Tu app, tus reglas. Todo se guarda en tu ordenador.</p></div>
+    <div><h1>Ajustes</h1><p>Tu app, tus reglas. Todo se guarda en ${WEB ? 'este navegador' : 'tu ordenador'}.</p></div>
   </div>
 
   <div class="settings-grid">
@@ -1670,11 +1678,11 @@ function viewAjustes() {
       <h2>Seguridad</h2>
       <p>Protege el acceso con un PIN de 4 a 8 dígitos.</p>
       <div class="setting-row">
-        <div><h3>PIN de acceso</h3><p>${pin ? 'Activado. Se pedirá al abrir la app o tras 30 días.' : 'Desactivado. Cualquiera en tu red podría entrar.'}</p></div>
+        <div><h3>PIN de acceso</h3><p>${pin ? 'Activado. Se pedirá al abrir la app o tras 30 días.' : (WEB ? 'Desactivado. Cualquiera con acceso a este navegador podría entrar.' : 'Desactivado. Cualquiera en tu red podría entrar.')}</p></div>
         <span class="badge ${pin ? 'badge--soft' : ''}">${pin ? 'Activado' : 'Desactivado'}</span>
       </div>
       <div class="setting-row">
-        <div><h3>${pin ? 'Cambiar o quitar PIN' : 'Crear un PIN'}</h3><p>Se guarda cifrado en el servidor local.</p></div>
+        <div><h3>${pin ? 'Cambiar o quitar PIN' : 'Crear un PIN'}</h3><p>Se guarda cifrado en ${WEB ? 'este navegador' : 'el servidor local'}.</p></div>
         <button class="btn btn-ghost btn-sm" type="button" data-action="pin">${icon('lock', 14)} ${pin ? 'Gestionar' : 'Configurar'}</button>
       </div>
       ${pin ? `<div class="setting-row">
@@ -1685,7 +1693,7 @@ function viewAjustes() {
 
     <section class="card setting-card">
       <h2>Datos y copias</h2>
-      <p>Tu información vive en <b>data/db.json</b>. Sin nube.</p>
+      <p>${WEB ? 'Versión web: tu información vive solo en <b>este navegador</b> (no se envía a ningún servidor). Exporta copias a menudo: si borras los datos del navegador, se pierden.' : 'Tu información vive en <b>data/db.json</b>. Sin nube.'}</p>
       <div class="setting-row">
         <div><h3>Copia de seguridad</h3><p>Descarga todo en un archivo JSON que puedes volver a importar.</p></div>
         <button class="btn btn-ghost btn-sm" type="button" data-action="export-json">${icon('download', 14)} Exportar</button>
@@ -1698,12 +1706,12 @@ function viewAjustes() {
         </div>
       </div>
       <div class="setting-row">
-        <div><h3>Importar copia</h3><p>Reemplaza los datos actuales. Se guarda una copia diaria automática.</p></div>
+        <div><h3>Importar copia</h3><p>Reemplaza los datos actuales.${WEB ? '' : ' Se guarda una copia diaria automática.'}</p></div>
         <button class="btn btn-ghost btn-sm" type="button" data-action="import-json">${icon('upload', 14)} Importar</button>
         <input type="file" id="importFile" accept="application/json,.json" hidden>
       </div>
-      <div class="path-box" title="Carpeta de datos">${esc(dataDir || 'data/')}</div>
-      <p class="tiny" style="margin-top:8px">Copias automáticas en <b>data/backups</b> (últimos 14 días).</p>
+      ${WEB ? '' : `<div class="path-box" title="Carpeta de datos">${esc(dataDir || 'data/')}</div>
+      <p class="tiny" style="margin-top:8px">Copias automáticas en <b>data/backups</b> (últimos 14 días).</p>`}
     </section>
 
     <section class="card setting-card">
@@ -1719,7 +1727,7 @@ function viewAjustes() {
       </div>
       <div class="setting-row">
         <div><h3>Versión</h3><p>${esc(store.session?.version || '1.1.0')} · datos rev ${esc(store.data.rev)}</p></div>
-        <span class="badge badge--soft">100% local</span>
+        <span class="badge badge--soft">${WEB ? 'Versión web' : '100% local'}</span>
       </div>
     </section>
   </div>
@@ -1954,14 +1962,14 @@ function openTransactionModal(tx = null, presetType, draft = null) {
       }
       if (!tx && formData.get('repeat')) {
         const before = store.data.transactions.length;
-        await api('POST', '/api/recurring', { ...payload, frequency: formData.get('frequency') || 'monthly', startDate: payload.date });
+        await api('POST', 'api/recurring', { ...payload, frequency: formData.get('frequency') || 'monthly', startDate: payload.date });
         const created = store.data.transactions.length - before;
         render();
         toast(created ? 'Movimiento añadido y programado para repetirse' : 'Recurrente programado para el ' + dateLabel(payload.date).toLowerCase());
         return;
       }
-      if (tx) await api('PATCH', `/api/transactions/${tx.id}`, payload);
-      else await api('POST', '/api/transactions', payload);
+      if (tx) await api('PATCH', `api/transactions/${tx.id}`, payload);
+      else await api('POST', 'api/transactions', payload);
       render();
       toast(tx ? 'Movimiento actualizado' : 'Movimiento añadido');
     },
@@ -1977,7 +1985,7 @@ function openTransactionModal(tx = null, presetType, draft = null) {
         confirm: 'Eliminar'
       });
       if (!ok) return;
-      await api('DELETE', `/api/transactions/${tx.id}`);
+      await api('DELETE', `api/transactions/${tx.id}`);
       dialog.close();
       dialog.remove();
       render();
@@ -2014,8 +2022,8 @@ function openAccountModal(account = null) {
         note: String(formData.get('note') || '')
       };
       if (!payload.name) throw new Error('Ponle un nombre a la cuenta.');
-      if (account) await api('PATCH', `/api/accounts/${account.id}`, payload);
-      else await api('POST', '/api/accounts', payload);
+      if (account) await api('PATCH', `api/accounts/${account.id}`, payload);
+      else await api('POST', 'api/accounts', payload);
       render();
       toast(account ? 'Cuenta actualizada' : 'Cuenta creada');
     },
@@ -2027,7 +2035,7 @@ function openAccountModal(account = null) {
         confirm: 'Eliminar'
       });
       if (!ok) return;
-      await api('DELETE', `/api/accounts/${account.id}`);
+      await api('DELETE', `api/accounts/${account.id}`);
       dialog.close();
       dialog.remove();
       render();
@@ -2092,8 +2100,8 @@ function openCategoryModal(category = null, kind = 'expense') {
         budget: payloadNumber(formData.get('budget'))
       };
       if (!payload.name) throw new Error('Ponle un nombre a la categoría.');
-      if (category) await api('PATCH', `/api/categories/${category.id}`, payload);
-      else await api('POST', '/api/categories', payload);
+      if (category) await api('PATCH', `api/categories/${category.id}`, payload);
+      else await api('POST', 'api/categories', payload);
       render();
       toast(category ? 'Categoría actualizada' : 'Categoría creada');
     },
@@ -2104,7 +2112,7 @@ function openCategoryModal(category = null, kind = 'expense') {
         confirm: 'Eliminar'
       });
       if (!ok) return;
-      await api('DELETE', `/api/categories/${category.id}`);
+      await api('DELETE', `api/categories/${category.id}`);
       dialog.close();
       dialog.remove();
       render();
@@ -2146,7 +2154,7 @@ function openBudgetModal() {
         if (value < 0) throw new Error('Los presupuestos no pueden ser negativos.');
         budgets[c.id] = value;
       }
-      await api('POST', '/api/budgets', { budgets });
+      await api('POST', 'api/budgets', { budgets });
       render();
       toast('Presupuestos actualizados');
     }
@@ -2199,8 +2207,8 @@ function openInvestmentModal(investment = null) {
       };
       if (!payload.name) throw new Error('Ponle un nombre a la inversión.');
       if (payload.currentPrice < 0) throw new Error('El precio no puede ser negativo.');
-      if (investment) await api('PATCH', `/api/investments/${investment.id}`, payload);
-      else await api('POST', '/api/investments', payload);
+      if (investment) await api('PATCH', `api/investments/${investment.id}`, payload);
+      else await api('POST', 'api/investments', payload);
       render();
       toast(investment ? 'Inversión actualizada' : 'Inversión creada. Añade ahora sus operaciones.');
     },
@@ -2212,7 +2220,7 @@ function openInvestmentModal(investment = null) {
         confirm: 'Eliminar'
       });
       if (!ok) return;
-      await api('DELETE', `/api/investments/${investment.id}`);
+      await api('DELETE', `api/investments/${investment.id}`);
       dialog.close();
       dialog.remove();
       render();
@@ -2315,14 +2323,14 @@ function openRecurringModal(rule = null, preset = {}) {
         payload.active = formData.get('active') !== '0';
       }
       const before = store.data.transactions.length;
-      if (rule) await api('PATCH', `/api/recurring/${rule.id}`, payload);
-      else await api('POST', '/api/recurring', payload);
+      if (rule) await api('PATCH', `api/recurring/${rule.id}`, payload);
+      else await api('POST', 'api/recurring', payload);
       const created = store.data.transactions.length - before;
       render();
       toast(rule ? 'Recurrente actualizado' : created > 0 ? `Recurrente creado · ${created} movimiento${created === 1 ? '' : 's'} añadido${created === 1 ? '' : 's'}` : 'Recurrente creado');
     },
     async onSecondary(dialog) {
-      await api('POST', `/api/recurring/${rule.id}/skip`);
+      await api('POST', `api/recurring/${rule.id}/skip`);
       dialog.close();
       dialog.remove();
       render();
@@ -2335,7 +2343,7 @@ function openRecurringModal(rule = null, preset = {}) {
         confirm: 'Eliminar'
       });
       if (!ok) return;
-      await api('DELETE', `/api/recurring/${rule.id}`);
+      await api('DELETE', `api/recurring/${rule.id}`);
       dialog.close();
       dialog.remove();
       render();
@@ -2398,15 +2406,15 @@ function openGoalModal(goal = null) {
       };
       if (!payload.name) throw new Error('Ponle un nombre al objetivo.');
       if (!(payload.target > 0)) throw new Error('La cantidad objetivo debe ser mayor que cero.');
-      if (goal) await api('PATCH', `/api/goals/${goal.id}`, payload);
-      else await api('POST', '/api/goals', payload);
+      if (goal) await api('PATCH', `api/goals/${goal.id}`, payload);
+      else await api('POST', 'api/goals', payload);
       render();
       toast(goal ? 'Objetivo actualizado' : 'Objetivo creado');
     },
     async onDanger(dialog) {
       const ok = await confirmDialog({ title: 'Eliminar objetivo', message: 'No afecta a tus cuentas ni movimientos.', confirm: 'Eliminar' });
       if (!ok) return;
-      await api('DELETE', `/api/goals/${goal.id}`);
+      await api('DELETE', `api/goals/${goal.id}`);
       dialog.close();
       dialog.remove();
       render();
@@ -2429,7 +2437,7 @@ function openGoalAmountModal(goal, mode = 'add') {
       const amount = payloadNumber(formData.get('amount'));
       if (!(amount > 0)) throw new Error('Introduce un importe mayor que cero.');
       const saved = Math.max(0, round((Number(goal.saved) || 0) + (add ? amount : -amount)));
-      await api('PATCH', `/api/goals/${goal.id}`, { saved });
+      await api('PATCH', `api/goals/${goal.id}`, { saved });
       render();
       toast(add ? 'Aportación guardada' : 'Retirada guardada');
       if (add && saved >= goal.target && (goal.saved || 0) < goal.target) setTimeout(() => toast(`¡Objetivo «${goal.name}» conseguido!`), 400);
@@ -2528,10 +2536,10 @@ function openOpModal(investmentId = null, op = null) {
       if (!fixed) payload.investmentId = formData.get('investmentId') || selectedId;
       if (!(payload.units > 0)) throw new Error('Introduce al menos una unidad.');
       if (payload.price < 0) throw new Error('El precio no puede ser negativo.');
-      if (op) await api('PATCH', `/api/ops/${op.id}`, payload);
-      else await api('POST', '/api/ops', payload);
+      if (op) await api('PATCH', `api/ops/${op.id}`, payload);
+      else await api('POST', 'api/ops', payload);
       if (formData.get('syncPrice')) {
-        await api('PATCH', `/api/investments/${payload.investmentId}`, { currentPrice: payload.price, priceUpdatedAt: payload.date });
+        await api('PATCH', `api/investments/${payload.investmentId}`, { currentPrice: payload.price, priceUpdatedAt: payload.date });
       }
       render();
       toast(op ? 'Operación actualizada' : payload.type === 'buy' ? 'Compra registrada' : 'Venta registrada');
@@ -2539,7 +2547,7 @@ function openOpModal(investmentId = null, op = null) {
     async onDanger(dialog) {
       const ok = await confirmDialog({ title: 'Eliminar operación', message: 'Se recalcularán las unidades y el precio medio.', confirm: 'Eliminar' });
       if (!ok) return;
-      await api('DELETE', `/api/ops/${op.id}`);
+      await api('DELETE', `api/ops/${op.id}`);
       dialog.close();
       dialog.remove();
       render();
@@ -2596,7 +2604,7 @@ function openHistoryModal(investmentId) {
         });
         if (!ok) return;
         try {
-          await api('DELETE', `/api/ops/${btn.dataset.delOp}`);
+          await api('DELETE', `api/ops/${btn.dataset.delOp}`);
           close();
           render();
           toast('Operación eliminada');
@@ -2624,7 +2632,7 @@ function openPriceModal(investment) {
     async onSubmit(formData) {
       const price = payloadNumber(formData.get('price'));
       if (price < 0) throw new Error('El precio no puede ser negativo.');
-      await api('PATCH', `/api/investments/${investment.id}`, { currentPrice: price, priceUpdatedAt: todayISO() });
+      await api('PATCH', `api/investments/${investment.id}`, { currentPrice: price, priceUpdatedAt: todayISO() });
       render();
       toast('Precio actualizado');
     }
@@ -2636,7 +2644,7 @@ function openPinModal() {
   const enabled = Boolean(store.data.settings.pinEnabled);
   openSheet({
     title: enabled ? 'Gestionar PIN' : 'Crear un PIN',
-    subtitle: 'El PIN debe tener entre 4 y 8 dígitos y se guarda cifrado en tu ordenador.',
+    subtitle: `El PIN debe tener entre 4 y 8 dígitos y se guarda cifrado en ${WEB ? 'este navegador' : 'tu ordenador'}.`,
     submitLabel: enabled ? 'Guardar' : 'Activar PIN',
     body: `
       ${enabled ? `<div class="field"><span>PIN actual</span><input name="currentPin" type="password" inputmode="numeric" maxlength="8" autocomplete="current-password"></div>` : ''}
@@ -2644,7 +2652,7 @@ function openPinModal() {
         <div class="field"><span>${enabled ? 'Nuevo PIN' : 'PIN'}</span><input name="newPin" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></div>
         <div class="field"><span>Repite el PIN</span><input name="repeatPin" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password"></div>
       </div>
-      ${enabled ? '<p class="seg-note">Deja los dos campos vacíos y guarda para quitar el PIN.</p>' : '<p class="seg-note">Si olvidas el PIN, puedes quitarlo editando data/db.json (campo pinHash) con la app cerrada.</p>'}
+      ${enabled ? '<p class="seg-note">Deja los dos campos vacíos y guarda para quitar el PIN.</p>' : (WEB ? '<p class="seg-note">En la versión web el PIN solo protege este navegador. Si lo olvidas, tendrás que borrar los datos del sitio.</p>' : '<p class="seg-note">Si olvidas el PIN, puedes quitarlo editando data/db.json (campo pinHash) con la app cerrada.</p>')}
     `,
     async onSubmit(formData) {
       const newPin = String(formData.get('newPin') || '');
@@ -2655,12 +2663,12 @@ function openPinModal() {
       if (!newPin && enabled) {
         const ok = await confirmDialog({
           title: 'Quitar el PIN',
-          message: 'La app quedará accesible para cualquiera que esté en tu red local.',
+          message: WEB ? 'La app quedará accesible para cualquiera que use este navegador.' : 'La app quedará accesible para cualquiera que esté en tu red local.',
           confirm: 'Quitar PIN'
         });
         if (!ok) return false;
       }
-      await api('POST', '/api/pin', { currentPin, newPin });
+      await api('POST', 'api/pin', { currentPin, newPin });
       render();
       toast(enabled && !newPin ? 'PIN desactivado' : 'PIN configurado');
     }
@@ -2767,7 +2775,7 @@ async function importFile(file) {
     danger: false
   });
   if (!ok) return;
-  const result = await api('POST', '/api/import', { data });
+  const result = await api('POST', 'api/import', { data });
   render();
   toast(`Copia importada: ${result.imported?.transactions ?? data.transactions.length} movimientos`);
 }
@@ -2780,7 +2788,7 @@ async function loadDemoData() {
     danger: false
   });
   if (!ok) return;
-  await api('POST', '/api/demo');
+  await api('POST', 'api/demo');
   ui.budgetMonth = monthKey(todayISO());
   ui.filters = { q: '', type: 'all', category: '', account: '', month: '' };
   render();
@@ -2794,7 +2802,7 @@ async function resetData() {
     confirm: 'Borrar todo'
   });
   if (!ok) return;
-  await api('POST', '/api/reset');
+  await api('POST', 'api/reset');
   ui.budgetMonth = monthKey(todayISO());
   ui.filters = { q: '', type: 'all', category: '', account: '', month: '' };
   render();
@@ -2902,7 +2910,7 @@ document.addEventListener('click', async (event) => {
         openPinModal();
         break;
       case 'logout':
-        await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+        await fetch('api/logout', { method: 'POST', credentials: 'same-origin' });
         store.data = null;
         showLock();
         break;
@@ -2979,7 +2987,7 @@ document.addEventListener('change', async (event) => {
         danger: false
       });
       if (!ok) { target.value = previous; return; }
-      await api('PATCH', '/api/settings', { currency: target.value });
+      await api('PATCH', 'api/settings', { currency: target.value });
       render();
       toast(`Moneda cambiada a ${target.value}`);
     }
