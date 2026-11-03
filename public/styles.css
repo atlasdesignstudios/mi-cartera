@@ -1231,3 +1231,6 @@ input.is-locked { background: var(--surface-2); color: var(--muted); cursor: not
 .search-field > svg, .search-field > i, .search-field > span { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); display: grid; color: var(--muted-2); pointer-events: none; z-index: 1; }
 .search-field > i svg, .search-field > span svg { position: static; }
 .field input.is-locked { background: var(--surface-2) !important; color: var(--muted) !important; }
+.live-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--income); vertical-align: 1px; box-shadow: 0 0 0 0 color-mix(in srgb, var(--income) 55%, transparent); animation: live-pulse 2s ease-out infinite; }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--income) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px transparent; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }

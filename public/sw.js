@@ -1,5 +1,5 @@
 // Service worker mínimo: red primero (sin caché HTTP), caché propia solo como respaldo sin conexión.
-const CACHE = 'micartera-v7';
+const CACHE = 'micartera-v8';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'fiscal.js', 'glyphs.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'fonts/inter-latin.woff2', 'vendor/qrcode.js'];
 
 self.addEventListener('install', (event) => {

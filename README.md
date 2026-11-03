@@ -91,14 +91,14 @@ La app no envía nada a Internet. No hay analítica, ni CDN, ni fuentes externas
 ### Precios de mercado
 
 - Acciones, ETF, fondos indexados y cripto se buscan en el mercado al crearlas (por nombre, ticker como `IWDA.AS` o `AAPL`, o ISIN como `IE00B03HD191`). El valor de la cartera sale siempre del precio real, no de lo que escribas. Los depósitos y «Otro» siguen siendo manuales.
-- Fuente: Yahoo Finance, con su retraso habitual (unos 15 minutos en bolsa; los fondos publican un valor liquidativo al día). Lo que cotiza en otra moneda se convierte al cambio del día. Los precios se actualizan cada 15 minutos con la app abierta (se puede desactivar en Ajustes).
+- **Precios en directo**: con la app abierta, acciones, ETF y cripto se actualizan en cuanto cambia su precio (cada pocos segundos en horario de mercado), igual en la versión local y en la web. Llegan por el canal en directo de Yahoo Finance (WebSocket), sin intermediarios ni coste. Los fondos indexados publican un valor liquidativo al día y se actualizan con la consulta periódica (cada 15 minutos). Fuera del horario de bolsa se mantiene el último cierre. Lo que cotiza en otra moneda se convierte con el tipo de cambio en directo. Se puede desactivar en Ajustes.
 - **Compras y ventas comprobadas**: al elegir la fecha se consulta el cierre de ese día y se usa como precio. Si tu bróker te dio otro precio, marca «precio de ejecución»: se acepta si cabe en el rango de ese día (mínimo y máximo, con un margen del 1,5 %). Si no, no se guarda.
 - **Contexto de cada compra**: variación de ese día y del mes anterior («compraste tras una caída del 8 %…») y cuánto ha cambiado el precio desde entonces.
 - Las operaciones de versiones anteriores se contrastan solas y, si su precio no encaja con el mercado, se marcan con un aviso y un botón para corregirlo.
 - Sin conexión con el mercado puedes guardar el precio de tu bróker: queda como «pendiente de comprobar» y se contrasta en la siguiente actualización.
 - Solo se envía el símbolo y la fecha, nunca importes ni datos personales. Es información orientativa, no asesoramiento financiero.
 
-**En la versión web** Yahoo no permite consultas directas desde el navegador, así que pasan por un intermediario público (allorigins o codetabs). Si fallan a menudo, crea el tuyo gratis en Cloudflare Workers con `tools/cloudflare-worker.js` y pega su dirección en **Ajustes → Cotizaciones → Intermediario propio**. La versión local consulta Yahoo directamente.
+**En la versión web** los precios en directo no necesitan intermediario. El histórico (gráfico, precio de cada compra y valor de los fondos) sí, porque Yahoo no permite esas consultas desde el navegador: pasan por un intermediario público (allorigins o codetabs). Si fallan a menudo, crea el tuyo gratis en Cloudflare Workers con `tools/cloudflare-worker.js` y pega su dirección en **Ajustes → Cotizaciones → Intermediario propio**. La versión local consulta Yahoo directamente.
 
 ## PIN y seguridad
 
@@ -165,6 +165,10 @@ Los que antes había que resolver a mano ya los resuelve la app:
 - **El navegador muestra datos antiguos**: el service worker ya no reutiliza archivos guardados por el navegador, la app detecta si el servidor tiene una versión más nueva y se recarga sola, y los datos se refrescan al volver a la pestaña. Si aun así ves algo raro: **Ajustes → Forzar actualización**.
 - **Restaurar una copia**: **Ajustes → Datos → Copias automáticas → Restaurar**. Antes se guarda una copia de lo que tienes ahora, así que se puede deshacer.
 - **Cambiar de ordenador**: **Ajustes → Sincronización cifrada → Crear** en el antiguo y **Abrir → Reemplazar todo** en el nuevo (o copia la carpeta `data/`).
+
+## Novedades de la 1.6
+
+- **Precios en directo** sin intermediarios ni coste, en la versión local y en la web: la cartera se revaloriza en cuanto se mueve el mercado.
 
 ## Novedades de la 1.5
 

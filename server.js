@@ -15,7 +15,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const PORT = Number(process.env.PORT) || 4321;
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 let LISTEN_PORT = PORT;
 
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -971,6 +971,12 @@ function demoState(profile = 'personal') {
       id: uid(), name, symbol, type, currentPrice, color, quoteSymbol, priceSource: '',
       priceUpdatedAt: todayISO(), note, createdAt: new Date().toISOString()
     };
+    // Moneda de cotización de referencia (se corrige con la primera consulta al mercado).
+    if (quoteSymbol) {
+      const usd = !/[.-]/.test(quoteSymbol);
+      item.nativeCurrency = usd ? 'USD' : 'EUR';
+      item.nativePrice = usd ? Math.round((currentPrice / 0.89) * 100) / 100 : currentPrice;
+    }
     s.investments.push(item);
     return item;
   };
@@ -1561,8 +1567,16 @@ async function marketQuote(symbol, target) {
   if (!(chart.price > 0)) throw new Error(`${symbol} no tiene precio ahora mismo.`);
   const fx = await fxNow(chart.currency, target);
   const bars = chart.bars;
-  const today = chart.time ? utcISO(Date.parse(chart.time)) : null;
+  let price = chart.price;
+  let time = chart.time;
+  let today = time ? utcISO(Date.parse(time)) : null;
   const last = bars[bars.length - 1];
+  // Los fondos a veces publican el valor liquidativo nuevo en el histórico antes que en el precio actual.
+  if (last && last.close > 0 && today && last.date > today) {
+    price = last.close;
+    today = last.date;
+    time = `${last.date}T21:00:00.000Z`;
+  }
   const prevBar = last && last.date === today ? bars[bars.length - 2] : last;
   const prevClose = prevBar ? prevBar.close : null;
   return {
@@ -1570,11 +1584,11 @@ async function marketQuote(symbol, target) {
     name: chart.name,
     exchange: chart.exchange,
     nativeCurrency: chart.currency,
-    nativePrice: r6(chart.price),
-    price: r6(chart.price * fx),
+    nativePrice: r6(price),
+    price: r6(price * fx),
     prevClose: prevClose ? r6(prevClose * fx) : null,
-    dayChangePct: prevClose ? pct(chart.price, prevClose) : null,
-    time: chart.time,
+    dayChangePct: prevClose ? pct(price, prevClose) : null,
+    time,
     spark: bars.slice(-66).map((b) => r6(b.close * fx))
   };
 }
@@ -1861,7 +1875,7 @@ function serveStatic(req, res, pathname) {
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'X-Frame-Options': 'DENY',
-      'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'"
+      'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' wss://streamer.finance.yahoo.com; manifest-src 'self'; base-uri 'none'; form-action 'self'"
     };
     res.writeHead(200, headers);
     if (req.method === 'HEAD') return res.end();
