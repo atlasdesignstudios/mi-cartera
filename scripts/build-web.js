@@ -26,6 +26,9 @@ const fiscalSrc = fs.readFileSync(path.join(PUBLIC_DIR, 'fiscal.js'), 'utf8');
 const fiscalExports = [...fiscalSrc.matchAll(/^export (?:const|function) ([A-Za-z0-9_]+)/gm)].map((m) => m[1]);
 const fiscal = 'const { invoiceTotals, purchaseTotals, validateNif, IVA_RATES, TAX_MODES } = (function () {\n'
   + fiscalSrc.replace(/^export /gm, '') + '\nreturn { ' + fiscalExports.join(', ') + ' };\n})();\n';
+// Iconos (public/glyphs.js): el servidor solo necesita normalizar las claves.
+const glyphSrc = fs.readFileSync(path.join(PUBLIC_DIR, 'glyphs.js'), 'utf8');
+const glyphs = 'const { normalizeGlyph } = (function () {\n' + glyphSrc.replace(/^export /gm, '') + '\nreturn { normalizeGlyph };\n})();\n';
 // Router de la API.
 const router = slice('function collectionById(', 'const server = http.createServer(');
 
@@ -125,25 +128,54 @@ function saveBackupNow(label = 'manual') {
 function networkInfo() { return { web: true }; }
 function sealPackage() { throw bad('El cifrado se hace directamente en el navegador.'); }
 function openPackage() { throw bad('El descifrado se hace directamente en el navegador.'); }
-// En la web solo se pueden consultar criptomonedas (CoinGecko permite peticiones desde el navegador).
-const COINGECKO = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', ADA: 'cardano', XRP: 'ripple', DOT: 'polkadot', DOGE: 'dogecoin', BNB: 'binancecoin', LTC: 'litecoin', AVAX: 'avalanche-2', LINK: 'chainlink', MATIC: 'matic-network', USDT: 'tether', USDC: 'usd-coin', TRX: 'tron', XLM: 'stellar' };
-function quoteSymbolFor(inv) {
-  return inv.type === 'crypto' && (inv.quoteSymbol || inv.symbol) ? (inv.quoteSymbol || inv.symbol) : '';
+// Yahoo Finance no permite llamadas directas desde una página web (CORS). En la versión web
+// las consultas pasan por un intermediario público que solo ve el símbolo (por ejemplo AAPL).
+const MARKET_ROUTES = [
+  { url: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
+  { url: (u) => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
+  { url: (u) => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u), wrapped: true }
+];
+let marketRoute = 0;
+function customProxyRoute() {
+  const base = String((typeof db !== 'undefined' && db && db.settings && db.settings.marketProxy) || '').trim();
+  if (!/^https:\/\//i.test(base)) return null;
+  return { url: (u) => base + encodeURIComponent(u), custom: base };
 }
-async function fetchQuote(inv, target) {
-  const raw = String(inv.quoteSymbol || inv.symbol || '').toUpperCase().replace(/-[A-Z]{3}$/, '');
-  const id = COINGECKO[raw] || raw.toLowerCase();
-  const cur = String(target || 'EUR').toLowerCase();
+async function tryRoute(route, url) {
+  const target = route.custom && route.custom.includes('{url}') ? route.custom.replace('{url}', encodeURIComponent(url)) : route.url(url);
   let response;
   try {
-    response = await nativeFetch('https://api.coingecko.com/api/v3/simple/price?ids=' + encodeURIComponent(id) + '&vs_currencies=' + cur, { signal: AbortSignal.timeout(10000) });
-  } catch { throw new Error('Sin conexión con CoinGecko.'); }
-  if (response.status === 429) throw new Error('CoinGecko está limitando las consultas. Prueba en un minuto.');
-  if (!response.ok) throw new Error('CoinGecko respondió ' + response.status + '.');
-  const body = await response.json().catch(() => null);
-  const price = Number(body?.[id]?.[cur]);
-  if (!(price > 0)) throw new Error('CoinGecko no conoce ' + raw + '.');
-  return { price, source: 'CoinGecko', symbol: raw };
+    response = await nativeFetch(target, { signal: AbortSignal.timeout(9000) });
+  } catch {
+    throw Object.assign(new Error('sin respuesta'), { network: true });
+  }
+  if (response.status === 404) throw Object.assign(new Error('Ese valor no existe en el mercado.'), { final: true });
+  if (!response.ok) throw Object.assign(new Error('HTTP ' + response.status), { network: true });
+  let body = await response.json().catch(() => null);
+  if (route.wrapped && body && typeof body.contents === 'string') {
+    try { body = JSON.parse(body.contents); } catch { body = null; }
+  }
+  if (!body || typeof body !== 'object') throw Object.assign(new Error('Respuesta vacía'), { network: true });
+  if (body.chart && body.chart.error && /not found|no data/i.test(String(body.chart.error.description || ''))) {
+    throw Object.assign(new Error('Ese valor no existe en el mercado.'), { final: true });
+  }
+  return body;
+}
+async function marketFetchJson(url) {
+  const custom = customProxyRoute();
+  if (custom) {
+    try { return await tryRoute(custom, url); } catch (err) { if (err.final) throw err; }
+  }
+  // Se prueba primero el intermediario que funcionó la última vez y, si falla, los demás a la vez.
+  try { return await tryRoute(MARKET_ROUTES[marketRoute], url); } catch (err) { if (err.final) throw err; }
+  const others = MARKET_ROUTES.map((r, i) => ({ r, i })).filter(({ i }) => i !== marketRoute);
+  try {
+    return await Promise.any(others.map(({ r, i }) => tryRoute(r, url).then((body) => { marketRoute = i; return body; })));
+  } catch (agg) {
+    const fin = (agg.errors || []).find((e) => e.final);
+    if (fin) throw fin;
+    throw Object.assign(new Error('No se pudo conectar con el servicio de cotizaciones. Revisa tu conexión o inténtalo en unos minutos.'), { network: true });
+  }
 }
 // SHA-256 síncrono (el PIN solo protege este navegador).
 function sha256Hex(text) {
@@ -262,7 +294,7 @@ globalThis.fetch = async function (input, init = {}) {
 
 fs.rmSync(DIST, { recursive: true, force: true });
 fs.cpSync(PUBLIC_DIR, DIST, { recursive: true });
-fs.writeFileSync(path.join(DIST, 'local-api.js'), shim + fiscal + core + '\n' + router + overrides, 'utf8');
+fs.writeFileSync(path.join(DIST, 'local-api.js'), shim + fiscal + glyphs + core + '\n' + router + overrides, 'utf8');
 
 const indexPath = path.join(DIST, 'index.html');
 const html = fs.readFileSync(indexPath, 'utf8');

@@ -1,6 +1,6 @@
 // Service worker mínimo: red primero (sin caché HTTP), caché propia solo como respaldo sin conexión.
-const CACHE = 'micartera-v6';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'fiscal.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'fonts/inter-latin.woff2', 'vendor/qrcode.js'];
+const CACHE = 'micartera-v7';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'fiscal.js', 'glyphs.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'fonts/inter-latin.woff2', 'vendor/qrcode.js'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).catch(() => {}));

@@ -1152,3 +1152,82 @@ body.is-onboarding .app { grid-template-columns: 1fr; }
   .sheet-foot > [data-secondary] { flex: 1 1 100%; order: 3; }
   .sheet-foot > .btn:not([data-secondary]) { flex: 1 1 0; justify-content: center; }
 }
+
+/* ---------------------------------------------------------------- 1.5 · iconos de línea y mercado */
+.emoji-grid button { display: grid; place-items: center; color: var(--muted); }
+.emoji-grid button.active { color: var(--accent-2); }
+.insight > span { color: var(--muted); }
+.field-glyph { display: inline-flex; align-items: center; gap: 6px; }
+.field-glyph i { display: inline-grid; color: var(--muted) !important; }
+.goal-foot svg { display: inline-block; vertical-align: -2px; }
+
+.chg { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 999px; font-size: 12px; font-weight: 560; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chg svg { width: 12px; height: 12px; }
+.chg small { font-weight: 400; opacity: 0.8; }
+.chg.up { color: var(--income); background: color-mix(in srgb, var(--income) 12%, transparent); }
+.chg.down { color: var(--danger); background: var(--danger-soft); }
+.num-up { color: var(--income); }
+.num-down { color: var(--danger); }
+.spark { display: block; flex: none; }
+.spark.up { color: var(--income); }
+.spark.down { color: var(--danger); }
+.pnl-day { display: flex; margin-top: 6px; }
+
+.holding-market { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); }
+.holding-price { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.holding-price > span { font-size: 11.5px; color: var(--muted); }
+.holding-price b { font-size: 16px; font-weight: 560; font-variant-numeric: tabular-nums; }
+.holding-price .chg { align-self: flex-start; }
+.holding-market .spark { width: 46%; max-width: 140px; height: 36px; }
+.holding-src { margin-top: 6px; font-size: 11.5px; color: var(--muted-2); }
+.holding-warn { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--amber) 14%, var(--surface)); font-size: 12.5px; color: var(--muted); }
+.holding-warn svg { flex: none; margin-top: 1px; }
+.link-btn { padding: 0; border: 0; background: none; color: var(--accent-2); font: inherit; font-weight: 560; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+
+.search-field { position: relative; display: flex; align-items: center; }
+.search-field svg { position: absolute; left: 14px; color: var(--muted-2); pointer-events: none; }
+.search-field input { width: 100%; padding-left: 40px; }
+.mkt-results { display: flex; flex-direction: column; gap: 4px; margin-top: -4px; }
+.mkt-results:empty { display: none; }
+.mkt-result { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 10px 12px; border: 0; border-radius: 12px; background: var(--surface-2); color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.mkt-result:hover, .mkt-result:focus-visible { background: var(--accent-soft); }
+.mkt-result > span:first-child { display: flex; flex-direction: column; min-width: 0; }
+.mkt-result b { font-size: 13.5px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mkt-result span span { font-size: 12px; color: var(--muted); }
+.mkt-result .asset-badge { flex: none; }
+.mkt-status { display: flex; align-items: center; gap: 6px; padding: 4px 2px; }
+.mkt-status--error { color: var(--danger); font-size: 13px; }
+.mkt-picked { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 14px; border-radius: 14px; background: var(--accent-soft); }
+.mkt-picked-main { display: flex; flex-direction: column; min-width: 0; flex: 1 1 180px; }
+.mkt-picked-main b { font-size: 14px; font-weight: 590; }
+.mkt-picked-main span { font-size: 12px; color: var(--muted); }
+.mkt-picked-live { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+
+.mkt-box { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: 14px; background: var(--surface-2); font-size: 13px; }
+.mkt-box-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: var(--muted); }
+.mkt-box-head small { font-size: 11.5px; }
+.mkt-box-head b { font-size: 19px; font-weight: 420; color: var(--text); font-variant-numeric: tabular-nums; }
+.mkt-box-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); }
+.mkt-box-row b { font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; }
+.mkt-verdict { margin: 4px 0 0; font-weight: 560; color: var(--text); }
+.mkt-verdict--good { color: var(--income); }
+.mkt-verdict--warn { color: color-mix(in srgb, var(--amber) 75%, var(--text)); }
+.mkt-since { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0; color: var(--muted); }
+input.is-locked { background: var(--surface-2); color: var(--muted); cursor: not-allowed; }
+.seg-note.is-error { color: var(--danger); }
+
+.history-row--rich { align-items: flex-start; }
+.op-context { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.op-context .mkt-verdict { margin: 0; font-size: 12px; }
+.op-alert { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 100%; color: var(--danger); }
+@media (max-width: 640px) {
+  .history-row { grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: start; }
+  .history-row > span:last-child { display: none; }
+  .history-row .tx-meta { white-space: normal; overflow: visible; text-overflow: clip; }
+  .history-row .side { grid-column: 2; text-align: left; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+  .history-row .side small { display: inline; white-space: normal; }
+}
+.search-field input { padding-left: 40px !important; }
+.search-field > svg, .search-field > i, .search-field > span { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); display: grid; color: var(--muted-2); pointer-events: none; z-index: 1; }
+.search-field > i svg, .search-field > span svg { position: static; }
+.field input.is-locked { background: var(--surface-2) !important; color: var(--muted) !important; }

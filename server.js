@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { invoiceTotals, purchaseTotals, validateNif, IVA_RATES, TAX_MODES } from './public/fiscal.js';
+import { normalizeGlyph } from './public/glyphs.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -14,7 +15,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const PORT = Number(process.env.PORT) || 4321;
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 let LISTEN_PORT = PORT;
 
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -30,6 +31,11 @@ const CLIENT_KINDS = ['empresa', 'autonomo', 'particular'];
 const TERRITORIES = ['comun', 'canarias', 'ceutamelilla', 'foral'];
 const LOAN_TYPES = ['mortgage', 'personal', 'car', 'student', 'other'];
 const SYMBOL_RE = /^[A-Za-z0-9.\-=^]{1,24}$/;
+const MARKET_TYPES = ['stock', 'etf', 'fund', 'crypto'];
+const PRICE_MODES = ['market', 'execution', 'manual', 'pending'];
+const MARKET_SOURCE = 'Yahoo Finance';
+const marketCache = new Map();
+const DAY_MS = 86400000;
 const FREQUENCIES = ['weekly', 'monthly', 'quarterly', 'yearly'];
 const THEMES = ['auto', 'light', 'dark'];
 const PALETTE = ['#0e9f6e', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16', '#64748b', '#f97316'];
@@ -78,33 +84,33 @@ function defaultState() {
   });
   return {
     rev: 0,
-    settings: { currency: 'EUR', locale: 'es-ES', theme: 'auto', pinHash: null, autoPrices: false, pricesRefreshedAt: null, profile: 'personal', onboarded: false, modules: defaultModules('personal'), business: sanitizeBusiness({}) },
+    settings: { currency: 'EUR', locale: 'es-ES', theme: 'auto', pinHash: null, autoPrices: true, marketV15: true, pricesRefreshedAt: null, marketProxy: '', profile: 'personal', onboarded: false, modules: defaultModules('personal'), business: sanitizeBusiness({}) },
     accounts: [
       acc('Cuenta principal', 'bank', '#0e9f6e'),
       acc('Ahorro', 'savings', '#3b82f6'),
       acc('Efectivo', 'cash', '#f59e0b')
     ],
     categories: [
-      cat('Vivienda', 'expense', '🏠', '#6366f1'),
-      cat('Alimentación', 'expense', '🛒', '#10b981'),
-      cat('Transporte', 'expense', '🚗', '#f59e0b'),
-      cat('Restaurantes', 'expense', '🍽️', '#f97316'),
-      cat('Salud', 'expense', '💊', '#ef4444'),
-      cat('Ocio', 'expense', '🎬', '#ec4899'),
-      cat('Compras', 'expense', '🛍️', '#8b5cf6'),
-      cat('Suscripciones', 'expense', '📺', '#06b6d4'),
-      cat('Educación', 'expense', '📚', '#3b82f6'),
-      cat('Viajes', 'expense', '✈️', '#14b8a6'),
-      cat('Mascotas', 'expense', '🐾', '#a3e635'),
-      cat('Impuestos', 'expense', '🧾', '#64748b'),
-      cat('Otros gastos', 'expense', '📦', '#94a3b8'),
-      cat('Nómina', 'income', '💼', '#0e9f6e'),
-      cat('Freelance', 'income', '🧑‍💻', '#0ea5e9'),
-      cat('Dividendos', 'income', '📈', '#8b5cf6'),
-      cat('Intereses', 'income', '🏦', '#14b8a6'),
-      cat('Ventas', 'income', '🏷️', '#f59e0b'),
-      cat('Regalos', 'income', '🎁', '#ec4899'),
-      cat('Otros ingresos', 'income', '➕', '#94a3b8')
+      cat('Vivienda', 'expense', 'home', '#6366f1'),
+      cat('Alimentación', 'expense', 'cart', '#10b981'),
+      cat('Transporte', 'expense', 'car', '#f59e0b'),
+      cat('Restaurantes', 'expense', 'utensils', '#f97316'),
+      cat('Salud', 'expense', 'pill', '#ef4444'),
+      cat('Ocio', 'expense', 'film', '#ec4899'),
+      cat('Compras', 'expense', 'bag', '#8b5cf6'),
+      cat('Suscripciones', 'expense', 'tv', '#06b6d4'),
+      cat('Educación', 'expense', 'book', '#3b82f6'),
+      cat('Viajes', 'expense', 'plane', '#14b8a6'),
+      cat('Mascotas', 'expense', 'paw', '#a3e635'),
+      cat('Impuestos', 'expense', 'receipt', '#64748b'),
+      cat('Otros gastos', 'expense', 'box', '#94a3b8'),
+      cat('Nómina', 'income', 'briefcase', '#0e9f6e'),
+      cat('Freelance', 'income', 'laptop', '#0ea5e9'),
+      cat('Dividendos', 'income', 'trend', '#8b5cf6'),
+      cat('Intereses', 'income', 'bank', '#14b8a6'),
+      cat('Ventas', 'income', 'tag', '#f59e0b'),
+      cat('Regalos', 'income', 'gift', '#ec4899'),
+      cat('Otros ingresos', 'income', 'plusCircle', '#94a3b8')
     ],
     transactions: [],
     investments: [],
@@ -296,7 +302,7 @@ function sanitizeCategory(obj, prev) {
     id: ensureId(obj, prev),
     name: clean(obj.name, 60) || 'Categoría',
     kind,
-    icon: clean(obj.icon, 8) || (kind === 'income' ? '➕' : '📦'),
+    icon: normalizeGlyph(obj.icon, kind === 'income' ? 'plusCircle' : 'box'),
     color: validColor(obj.color) || '#64748b',
     budget: kind === 'expense' ? Math.max(0, round2(obj.budget)) : 0,
     createdAt: prev?.createdAt || new Date().toISOString()
@@ -350,7 +356,29 @@ function sanitizeInvestment(obj, prev) {
     priceSource: clean(obj.priceSource, 40),
     color: validColor(obj.color) || '#8b5cf6',
     note: clean(obj.note, 300),
+    ...investmentMarketFields(obj),
     createdAt: prev?.createdAt || new Date().toISOString()
+  };
+}
+/** Datos de mercado que guarda cada inversión (los rellena el servidor, nunca el usuario). */
+function investmentMarketFields(o) {
+  const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : round6(Number(v)));
+  return {
+    prevClose: num(o.prevClose),
+    dayChangePct: num(o.dayChangePct),
+    nativeCurrency: /^[A-Z]{3}$/.test(String(o.nativeCurrency || '')) ? o.nativeCurrency : null,
+    nativePrice: num(o.nativePrice),
+    marketName: String(o.marketName || '').slice(0, 80),
+    exchange: String(o.exchange || '').slice(0, 40),
+    priceAt: typeof o.priceAt === 'string' && !Number.isNaN(Date.parse(o.priceAt)) ? o.priceAt.slice(0, 30) : null,
+    spark: Array.isArray(o.spark) ? o.spark.slice(-66).map(Number).filter((n) => n > 0).map(round6) : []
+  };
+}
+function opMarketFields(o) {
+  return {
+    priceMode: PRICE_MODES.includes(o.priceMode) ? o.priceMode : 'manual',
+    market: sanitizeMarketContext(o.market),
+    demo: o.demo ? true : undefined
   };
 }
 function unitsFor(investmentId, list = db.ops) {
@@ -385,8 +413,10 @@ function sanitizeOp(obj, prev, candidateList) {
     fees,
     date: validDate(obj.date) ? obj.date : todayISO(),
     note: clean(obj.note, 300),
+    ...opMarketFields(obj),
     createdAt: prev?.createdAt || new Date().toISOString()
   };
+  if (!op.demo) delete op.demo;
   const list = candidateList ? candidateList(op) : [...db.ops, op];
   if (unitsFor(investment.id, list) < -1e-8) throw bad('No puedes vender más unidades de las que tienes.');
   return op;
@@ -485,7 +515,7 @@ function sanitizeGoal(obj, prev) {
   return {
     id: ensureId(obj, prev),
     name: clean(obj.name, 60) || 'Objetivo',
-    icon: clean(obj.icon, 8) || '🎯',
+    icon: normalizeGlyph(obj.icon, 'target'),
     color: validColor(obj.color) || '#3b82f6',
     target,
     saved: accountId ? 0 : Math.max(0, round2(obj.saved)),
@@ -593,6 +623,20 @@ function upgradeSettings(state, raw) {
     : defaultModules(s.profile);
   s.modules = sanitizeModules(raw.modules, legacy);
   s.business = sanitizeBusiness(raw.business || {});
+  s.marketProxy = typeof raw.marketProxy === 'string' && /^https:\/\//i.test(raw.marketProxy) ? raw.marketProxy.slice(0, 300) : '';
+  // 1.5: los iconos pasan de emoji a iconos de línea.
+  for (const c of state.categories || []) c.icon = normalizeGlyph(c.icon, c.kind === 'income' ? 'plusCircle' : 'box');
+  for (const g of state.goals || []) g.icon = normalizeGlyph(g.icon, 'target');
+  // 1.5: las inversiones que cotizan se valoran con el precio real del mercado.
+  if (!raw.marketV15) {
+    s.marketV15 = true;
+    s.autoPrices = true;
+    const target = s.currency || 'EUR';
+    for (const inv of state.investments || []) {
+      if (inv.quoteSymbol || !inv.symbol || !['stock', 'etf', 'crypto'].includes(inv.type)) continue;
+      inv.quoteSymbol = inv.type === 'crypto' ? `${inv.symbol}-${target}` : inv.symbol;
+    }
+  } else s.marketV15 = true;
 }
 function ensureCategory(name, kind, icon, color) {
   let cat = db.categories.find((c) => c.kind === kind && c.name === name);
@@ -721,7 +765,7 @@ function payInvoice(inv, body) {
   if (inv.status === 'draft') throw bad('Primero emite la factura.');
   const account = db.accounts.find((a) => a.id === body.accountId) || db.accounts[0];
   if (!account) throw bad('Crea una cuenta para registrar el cobro.');
-  const cat = ensureCategory('Facturación', 'income', '🧾', '#0e9f6e');
+  const cat = ensureCategory('Facturación', 'income', 'invoice', '#0e9f6e');
   const total = round2(inv.total ?? invoiceTotals(inv).total);
   const date = validDate(body.date) ? body.date : todayISO();
   const existing = inv.transactionId && db.transactions.find((t) => t.id === inv.transactionId);
@@ -738,7 +782,7 @@ function payInvoice(inv, body) {
   } else if (total < 0) {
     const tx = {
       id: uid(), type: 'expense', amount: Math.abs(total), date, accountId: account.id, toAccountId: null,
-      categoryId: ensureCategory('Gastos del negocio', 'expense', '💼', '#64748b').id,
+      categoryId: ensureCategory('Gastos del negocio', 'expense', 'briefcase', '#64748b').id,
       note: `Abono ${inv.number} · ${inv.buyer?.name || ''}`.trim(), recurringId: null, invoiceId: inv.id, purchaseId: null,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
     };
@@ -812,8 +856,8 @@ function linkPurchaseTx(p) {
     return;
   }
   const cat = p.kind === 'reta'
-    ? ensureCategory('Cuota de autónomos', 'expense', '🧾', '#64748b')
-    : ensureCategory('Gastos del negocio', 'expense', '💼', '#64748b');
+    ? ensureCategory('Cuota de autónomos', 'expense', 'receipt', '#64748b')
+    : ensureCategory('Gastos del negocio', 'expense', 'briefcase', '#64748b');
   const note = `${p.supplier}${p.number ? ' · ' + p.number : ''}${p.concept ? ' · ' + p.concept : ''}`.slice(0, 500);
   if (existing) {
     Object.assign(existing, { amount: p.total, date: p.date, accountId: p.accountId, note, updatedAt: new Date().toISOString() });
@@ -933,7 +977,9 @@ function demoState(profile = 'personal') {
   const op = (investmentId, type, units, price, fees, offset, day, note) =>
     s.ops.push({
       id: uid(), investmentId, type, units: round8(units), price, fees,
-      date: monthDate(offset, day), note: note || '', createdAt: new Date().toISOString()
+      date: monthDate(offset, day), note: note || '', createdAt: new Date().toISOString(),
+      // Precio provisional: al consultar el mercado se sustituye por el cierre real de ese día.
+      priceMode: 'market', market: null, demo: true
     });
 
   const catByName = (name) => s.categories.find((c) => c.name === name)?.id || null;
@@ -955,23 +1001,23 @@ function demoState(profile = 'personal') {
 
   if (!freelancer) {
     s.goals.push(
-      { id: uid(), name: 'Fondo de emergencia', icon: '🛟', color: '#3b82f6', target: 9000, saved: 0, accountId: savings.id, deadline: monthDate(10, 1), note: '6 meses de gastos', done: false, createdAt: new Date().toISOString() },
-      { id: uid(), name: 'Viaje a Japón', icon: '✈️', color: '#ec4899', target: 3200, saved: 850, accountId: null, deadline: monthDate(8, 1), note: '', done: false, createdAt: new Date().toISOString() }
+      { id: uid(), name: 'Fondo de emergencia', icon: 'lifebuoy', color: '#3b82f6', target: 9000, saved: 0, accountId: savings.id, deadline: monthDate(10, 1), note: '6 meses de gastos', done: false, createdAt: new Date().toISOString() },
+      { id: uid(), name: 'Viaje a Japón', icon: 'plane', color: '#ec4899', target: 3200, saved: 850, accountId: null, deadline: monthDate(8, 1), note: '', done: false, createdAt: new Date().toISOString() }
     );
 
-    const world = inv('MSCI World', 'IWDA', 'etf', 112.4, '#3b82f6', 'ETF global acumulativo', 'IWDA.AS');
-    op(world.id, 'buy', 8, 94.1, 1, -7, 10, 'Primera aportación');
-    op(world.id, 'buy', 14, 101.3, 1, -4, 8, 'Aportación periódica');
+    const world = inv('iShares Core MSCI World', 'IWDA', 'etf', 129, '#3b82f6', 'ETF global acumulativo', 'IWDA.AS');
+    op(world.id, 'buy', 8, 118, 1, -7, 10, 'Primera aportación');
+    op(world.id, 'buy', 14, 122, 1, -4, 8, 'Aportación periódica');
 
-    const aapl = inv('Apple', 'AAPL', 'stock', 214.5, '#64748b', 'Acciones');
-    op(aapl.id, 'buy', 4, 181.2, 1, -5, 14, '');
+    const aapl = inv('Apple', 'AAPL', 'stock', 296, '#64748b', 'Acciones', 'AAPL');
+    op(aapl.id, 'buy', 4, 250, 1, -5, 14, '');
 
-    const btc = inv('Bitcoin', 'BTC', 'crypto', 61500, '#f59e0b', 'Criptomoneda');
-    op(btc.id, 'buy', 0.018, 54000, 2, -6, 20, '');
-    op(btc.id, 'buy', 0.024, 58000, 2, -2, 18, '');
+    const btc = inv('Bitcoin', 'BTC', 'crypto', 69500, '#f59e0b', 'Criptomoneda', 'BTC-EUR');
+    op(btc.id, 'buy', 0.018, 80000, 2, -6, 20, '');
+    op(btc.id, 'buy', 0.024, 75000, 2, -2, 18, '');
 
-    const fund = inv('Fondo indexado', 'FIDX', 'fund', 14.9, '#8b5cf6', 'Plan de pensiones');
-    op(fund.id, 'buy', 82, 12.85, 0, -3, 5, 'Aportación anual');
+    const fund = inv('Vanguard Global Stock Index', 'VGSI', 'fund', 63.6, '#8b5cf6', 'Fondo indexado', '0P00000RQC.F');
+    op(fund.id, 'buy', 40, 58, 0, -3, 5, 'Aportación anual');
 
     s.loans.push({
       id: uid(), name: 'Préstamo del coche', type: 'car', principal: 14000, annualRate: 6.5, termMonths: 60,
@@ -990,9 +1036,9 @@ function demoState(profile = 'personal') {
 /** Datos de ejemplo de un diseñador autónomo: clientes, facturas, gastos con IVA y cuota de autónomos. */
 function addBusinessDemo(s, accountId) {
   const now = new Date().toISOString();
-  const income = { id: uid(), name: 'Facturación', kind: 'income', icon: '🧾', color: '#0e9f6e', budget: 0, createdAt: now };
-  const bizCat = { id: uid(), name: 'Gastos del negocio', kind: 'expense', icon: '💼', color: '#64748b', budget: 0, createdAt: now };
-  const retaCat = { id: uid(), name: 'Cuota de autónomos', kind: 'expense', icon: '🧾', color: '#64748b', budget: 0, createdAt: now };
+  const income = { id: uid(), name: 'Facturación', kind: 'income', icon: 'invoice', color: '#0e9f6e', budget: 0, createdAt: now };
+  const bizCat = { id: uid(), name: 'Gastos del negocio', kind: 'expense', icon: 'briefcase', color: '#64748b', budget: 0, createdAt: now };
+  const retaCat = { id: uid(), name: 'Cuota de autónomos', kind: 'expense', icon: 'receipt', color: '#64748b', budget: 0, createdAt: now };
   s.categories.push(income, bizCat, retaCat);
   const client = (name, nif, kind, city, extra = {}) => {
     const c = { id: uid(), name, nif, kind, address: 'Calle Mayor 1', zip: '28013', city, province: city, country: 'España', email: '', phone: '', taxMode: 'normal', irpfRate: null, recargo: false, note: '', createdAt: now, ...extra };
@@ -1092,7 +1138,7 @@ function importState(input) {
     id: keepId(c),
     name: text(c.name, 60, 'Categoría'),
     kind: c.kind === 'income' ? 'income' : 'expense',
-    icon: text(c.icon, 8, c.kind === 'income' ? '➕' : '📦'),
+    icon: normalizeGlyph(c.icon, c.kind === 'income' ? 'plusCircle' : 'box'),
     color: validColor(c.color) || '#64748b',
     budget: amount(c.budget),
     createdAt: text(c.createdAt, 40, new Date().toISOString())
@@ -1108,6 +1154,7 @@ function importState(input) {
     priceSource: text(i.priceSource, 40),
     color: validColor(i.color) || '#8b5cf6',
     note: text(i.note, 300),
+    ...investmentMarketFields(i),
     createdAt: text(i.createdAt, 40, new Date().toISOString())
   }));
   const accountIds = new Set(state.accounts.map((a) => a.id));
@@ -1143,9 +1190,11 @@ function importState(input) {
       fees: amount(o.fees),
       date: validDate(o.date) ? o.date : todayISO(),
       note: text(o.note, 300),
+      ...opMarketFields(o),
       createdAt: text(o.createdAt, 40, new Date().toISOString())
     }))
     .filter((o) => o.units > 0 && investmentIds.has(o.investmentId));
+  for (const op of state.ops) if (!op.demo) delete op.demo;
   for (const op of state.ops) {
     const raw = (input.ops || []).find((o) => o && o.id === op.id);
     op.accountId = raw && accountIds.has(raw.accountId) ? raw.accountId : null;
@@ -1184,7 +1233,7 @@ function importState(input) {
     .map((g) => ({
       id: keepId(g),
       name: text(g.name, 60, 'Objetivo'),
-      icon: text(g.icon, 8, '🎯'),
+      icon: normalizeGlyph(g.icon, 'target'),
       color: validColor(g.color) || '#3b82f6',
       target: amount(g.target),
       saved: amount(g.saved),
@@ -1406,69 +1455,319 @@ function networkInfo() {
   return { web: false, port: LISTEN_PORT, urls, platform: process.platform, hostname: os.hostname() };
 }
 
-// ---------------------------------------------------------------- cotizaciones (opcional, solo si el usuario lo activa)
-const quoteCache = new Map();
-async function yahooQuote(symbol) {
-  if (typeof fetch !== 'function') throw new Error('Necesitas Node.js 18 o superior para actualizar precios.');
-  const cached = quoteCache.get(symbol);
-  if (cached && cached.at > Date.now() - 5 * 60 * 1000) return cached.value;
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`;
+// ---------------------------------------------------------------- mercado (Yahoo Finance)
+// Las inversiones en bolsa, ETF, fondos y cripto se valoran con el precio real del mercado.
+// Solo se envía el símbolo del valor (por ejemplo AAPL); nunca cantidades ni datos personales.
+
+async function marketFetchJson(url) {
+  if (typeof fetch !== 'function') throw new Error('Necesitas Node.js 18 o superior para consultar el mercado.');
   let response;
   try {
-    response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 MiCartera' }, signal: AbortSignal.timeout(10000) });
+    response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (MiCartera)', Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
   } catch {
-    throw new Error('Sin conexión con el servicio de cotizaciones.');
+    throw Object.assign(new Error('No hay conexión con el servicio de cotizaciones.'), { network: true });
   }
-  if (response.status === 404) throw new Error(`No se encontró el símbolo ${symbol}.`);
-  if (!response.ok) throw new Error(`El servicio de cotizaciones respondió ${response.status}.`);
+  if (response.status === 404) throw new Error('Ese valor no existe en el mercado.');
+  if (!response.ok) throw Object.assign(new Error(`El servicio de cotizaciones respondió con un error (${response.status}).`), { network: response.status === 429 || response.status >= 500 });
   const body = await response.json().catch(() => null);
-  const meta = body?.chart?.result?.[0]?.meta;
-  let price = Number(meta?.regularMarketPrice);
-  let currency = String(meta?.currency || '');
-  if (!(price > 0)) throw new Error(`Sin precio para ${symbol}.`);
-  if (currency === 'GBp' || currency === 'GBX') { price /= 100; currency = 'GBP'; }
-  const value = { price, currency: currency.toUpperCase() };
-  quoteCache.set(symbol, { at: Date.now(), value });
-  return value;
+  if (!body) throw new Error('El servicio de cotizaciones devolvió una respuesta no válida.');
+  return body;
 }
-function quoteSymbolFor(inv, target) {
-  if (inv.quoteSymbol) return inv.quoteSymbol;
-  // Fondos, depósitos y otros solo se actualizan si tienen un símbolo de cotización explícito.
-  if (!inv.symbol || !['stock', 'etf', 'crypto'].includes(inv.type)) return '';
-  return inv.type === 'crypto' ? `${inv.symbol}-${target}` : inv.symbol;
+
+async function marketJson(url, ttlMs) {
+  const hit = marketCache.get(url);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.body;
+  const body = await marketFetchJson(url);
+  marketCache.set(url, { at: Date.now(), body });
+  if (marketCache.size > 300) marketCache.delete(marketCache.keys().next().value);
+  return body;
 }
-async function fetchQuote(inv, target) {
-  const symbol = quoteSymbolFor(inv, target);
-  if (!symbol) throw new Error('Añade un símbolo de cotización.');
-  const quote = await yahooQuote(symbol);
-  let price = quote.price;
-  if (quote.currency && quote.currency !== target) {
-    const fx = await yahooQuote(`${quote.currency}${target}=X`);
-    price *= fx.price;
+
+function isMarketLinked(inv) {
+  return Boolean(inv && MARKET_TYPES.includes(inv.type) && inv.quoteSymbol);
+}
+
+function utcISO(ms) {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+function pct(a, b) {
+  return a > 0 && b > 0 ? Math.round((a / b - 1) * 10000) / 100 : null;
+}
+
+const r6 = (n) => (Number.isFinite(n) ? Math.round(n * 1e6) / 1e6 : null);
+
+/** Velas diarias de Yahoo Finance ya limpias y con la moneda normalizada. */
+async function marketChart(symbol, { range, from, to } = {}) {
+  const span = range ? `range=${range}` : `period1=${Math.floor(from / 1000)}&period2=${Math.floor(to / 1000)}`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${span}&interval=1d&includePrePost=false`;
+  const body = await marketJson(url, range ? 5 * 60000 : 6 * 3600000);
+  const result = body?.chart?.result?.[0];
+  if (!result) {
+    const why = body?.chart?.error?.description;
+    throw new Error(why && /no data|delisted|not found/i.test(why) ? `No hay cotizaciones de ${symbol}.` : `No se encontró ${symbol} en el mercado.`);
   }
-  return { price, source: 'Yahoo Finance', symbol };
+  const meta = result.meta || {};
+  let currency = String(meta.currency || '').trim();
+  let factor = 1;
+  if (currency === 'GBp' || currency === 'GBX') { currency = 'GBP'; factor = 0.01; }
+  if (currency === 'ZAc') { currency = 'ZAR'; factor = 0.01; }
+  currency = currency.toUpperCase();
+  const offset = (Number(meta.gmtoffset) || 0) * 1000;
+  const q = result.indicators?.quote?.[0] || {};
+  const bars = (result.timestamp || []).map((t, i) => {
+    const close = Number(q.close?.[i]) * factor;
+    return {
+      date: utcISO(t * 1000 + offset),
+      close,
+      open: Number(q.open?.[i]) * factor || close,
+      high: Number(q.high?.[i]) * factor || close,
+      low: Number(q.low?.[i]) * factor || close
+    };
+  }).filter((b) => b.close > 0);
+  return {
+    symbol: String(meta.symbol || symbol),
+    name: String(meta.longName || meta.shortName || symbol).slice(0, 80),
+    exchange: String(meta.fullExchangeName || meta.exchangeName || '').slice(0, 40),
+    type: String(meta.instrumentType || ''),
+    currency,
+    price: Number(meta.regularMarketPrice) * factor || (bars.length ? bars[bars.length - 1].close : 0),
+    time: Number(meta.regularMarketTime) ? new Date(Number(meta.regularMarketTime) * 1000).toISOString() : null,
+    bars
+  };
 }
+
+/** Tipo de cambio de una moneda a la de la app (1 si son iguales). */
+async function fxNow(from, to) {
+  if (!from || from === to) return 1;
+  const chart = await marketChart(`${from}${to}=X`, { range: '5d' });
+  if (!(chart.price > 0)) throw new Error(`No hay tipo de cambio ${from}/${to}.`);
+  return chart.price;
+}
+
+async function fxOn(from, to, date) {
+  if (!from || from === to) return 1;
+  const t = Date.parse(`${date}T12:00:00Z`);
+  const chart = await marketChart(`${from}${to}=X`, { from: t - 10 * DAY_MS, to: t + 2 * DAY_MS });
+  const bar = [...chart.bars].reverse().find((b) => b.date <= date) || chart.bars[0];
+  if (!bar) return fxNow(from, to);
+  return bar.close;
+}
+
+/** Cotización actual: precio, variación del día y evolución de los últimos 3 meses. */
+async function marketQuote(symbol, target) {
+  const chart = await marketChart(symbol, { range: '3mo' });
+  if (!(chart.price > 0)) throw new Error(`${symbol} no tiene precio ahora mismo.`);
+  const fx = await fxNow(chart.currency, target);
+  const bars = chart.bars;
+  const today = chart.time ? utcISO(Date.parse(chart.time)) : null;
+  const last = bars[bars.length - 1];
+  const prevBar = last && last.date === today ? bars[bars.length - 2] : last;
+  const prevClose = prevBar ? prevBar.close : null;
+  return {
+    symbol: chart.symbol,
+    name: chart.name,
+    exchange: chart.exchange,
+    nativeCurrency: chart.currency,
+    nativePrice: r6(chart.price),
+    price: r6(chart.price * fx),
+    prevClose: prevClose ? r6(prevClose * fx) : null,
+    dayChangePct: prevClose ? pct(chart.price, prevClose) : null,
+    time: chart.time,
+    spark: bars.slice(-66).map((b) => r6(b.close * fx))
+  };
+}
+
+/** Precio de un valor en una fecha concreta, con el contexto de ese día y del mes anterior. */
+async function marketPriceOn(symbol, date, target) {
+  if (!validDate(String(date))) throw new Error('Fecha no válida.');
+  if (date > todayISO()) throw new Error('La fecha no puede ser futura.');
+  const t = Date.parse(`${date}T12:00:00Z`);
+  const chart = await marketChart(symbol, { from: t - 45 * DAY_MS, to: t + 2 * DAY_MS });
+  const before = chart.bars.filter((b) => b.date <= date);
+  const bar = before[before.length - 1];
+  if (!bar) throw new Error(`No hay cotización de ${symbol} en esa fecha. Puede que aún no cotizara.`);
+  const gapDays = Math.round((t - Date.parse(`${bar.date}T12:00:00Z`)) / DAY_MS);
+  if (gapDays > 7) throw new Error(`${symbol} no cotizó cerca de esa fecha.`);
+  const prev = before[before.length - 2];
+  const monthAgo = before.find((b) => b.date >= utcISO(t - 30 * DAY_MS));
+  const fx = await fxOn(chart.currency, target, bar.date);
+  return {
+    symbol: chart.symbol,
+    name: chart.name,
+    date,
+    tradeDate: bar.date,
+    nativeCurrency: chart.currency,
+    fx: r6(fx),
+    close: r6(bar.close * fx),
+    open: r6(bar.open * fx),
+    high: r6(Math.max(bar.high, bar.close) * fx),
+    low: r6(Math.min(bar.low, bar.close) * fx),
+    prevClose: prev ? r6(prev.close * fx) : null,
+    dayChangePct: prev ? pct(bar.close, prev.close) : null,
+    trend30Pct: monthAgo && monthAgo !== bar ? pct(bar.close, monthAgo.close) : null
+  };
+}
+
+const SEARCH_TYPES = { EQUITY: 'stock', ETF: 'etf', MUTUALFUND: 'fund', CRYPTOCURRENCY: 'crypto' };
+
+async function marketSearch(query) {
+  const q = String(query || '').trim().slice(0, 60);
+  if (q.length < 2) return [];
+  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=12&newsCount=0&listsCount=0&enableFuzzyQuery=false`;
+  const body = await marketJson(url, 3600000);
+  return (body?.quotes || [])
+    .filter((x) => x.symbol && SEARCH_TYPES[x.quoteType])
+    .slice(0, 8)
+    .map((x) => ({
+      symbol: String(x.symbol).slice(0, 24),
+      name: String(x.longname || x.shortname || x.symbol).slice(0, 80),
+      type: SEARCH_TYPES[x.quoteType],
+      exchange: String(x.exchDisp || x.exchange || '').slice(0, 30)
+    }));
+}
+
+function sanitizeMarketContext(m) {
+  if (!m || typeof m !== 'object') return null;
+  const n = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? r6(Number(v)) : null);
+  if (!validDate(String(m.tradeDate || ''))) return null;
+  return {
+    tradeDate: m.tradeDate,
+    close: n(m.close), open: n(m.open), high: n(m.high), low: n(m.low),
+    prevClose: n(m.prevClose), dayChangePct: n(m.dayChangePct), trend30Pct: n(m.trend30Pct),
+    nativeCurrency: /^[A-Z]{3}$/.test(String(m.nativeCurrency || '')) ? m.nativeCurrency : null,
+    checkedAt: typeof m.checkedAt === 'string' ? m.checkedAt.slice(0, 30) : null
+  };
+}
+
+function marketMoney(n) {
+  return Number(n).toLocaleString('es-ES', { style: 'currency', currency: db.settings.currency || 'EUR', minimumFractionDigits: 2, maximumFractionDigits: n < 10 ? 4 : 2 });
+}
+
+/**
+ * Antes de guardar una compra o venta de un valor que cotiza, el servidor busca el precio
+ * real de ese día. El usuario puede usar el cierre o su precio de ejecución, pero solo si
+ * está dentro del rango en que cotizó el valor ese día.
+ */
+async function prepareMarketOp(body, prev = null) {
+  const merged = { ...(prev || {}), ...body };
+  const inv = db.investments.find((i) => i.id === merged.investmentId);
+  if (!isMarketLinked(inv)) return { ...body, priceMode: 'manual', market: null };
+  const relevant = ['date', 'price', 'priceMode', 'investmentId', 'amount', 'units'].some((k) => body[k] !== undefined && (!prev || body[k] !== prev[k]));
+  if (prev && prev.market && !relevant) return body;
+  if (!['buy', 'sell'].includes(merged.type)) return { ...body, priceMode: 'manual', market: null };
+  let ctx;
+  try {
+    ctx = await marketPriceOn(inv.quoteSymbol, merged.date, db.settings.currency || 'EUR');
+  } catch (err) {
+    // Sin conexión con el mercado: se guarda el precio del bróker como pendiente y se comprueba en la próxima actualización.
+    const typed = Number(merged.price);
+    if (err.network && merged.priceMode === 'execution' && typed > 0) {
+      const out = { ...body, price: r6(typed), priceMode: 'pending', market: null };
+      delete out.amount;
+      delete out.amountMode;
+      return out;
+    }
+    throw bad(`No se pudo comprobar el precio de ${inv.name} el ${String(merged.date || "").split("-").reverse().join("/")}: ${err.message}${err.network ? ' Si tienes el precio que te dio tu bróker, marca «precio de ejecución» y escríbelo: quedará pendiente de comprobar.' : ''}`);
+  }
+  const mode = merged.priceMode === 'execution' ? 'execution' : 'market';
+  let price = ctx.close;
+  if (mode === 'execution') {
+    price = Number(merged.price);
+    const lo = ctx.low * 0.985;
+    const hi = ctx.high * 1.015;
+    if (!(price > 0) || price < lo || price > hi) {
+      throw bad(`El ${ctx.tradeDate.split('-').reverse().join('/')} ${inv.name} cotizó entre ${marketMoney(ctx.low)} y ${marketMoney(ctx.high)}. Un precio de ${price > 0 ? marketMoney(price) : '0'} no es posible: revisa la fecha o usa el precio de mercado.`);
+    }
+  }
+  const out = { ...body, price: r6(price), priceMode: mode, market: { ...ctx, checkedAt: new Date().toISOString() } };
+  const amount = Number(merged.amount);
+  if (merged.amountMode && amount > 0) {
+    const fees = Math.max(0, Number(merged.fees) || 0);
+    const units = merged.type === 'buy' ? (amount - fees) / price : (amount + fees) / price;
+    if (!(units > 0)) throw bad('El importe no cubre las comisiones.');
+    out.units = Math.round(units * 1e8) / 1e8;
+  }
+  delete out.amount;
+  delete out.amountMode;
+  return out;
+}
+
+/** Al crear o editar una inversión que cotiza se comprueba el símbolo y se trae su precio real. */
+async function prepareMarketInvestment(body, prev = null) {
+  const merged = { ...(prev || {}), ...body };
+  if (!MARKET_TYPES.includes(merged.type)) return { ...body, quoteSymbol: '' };
+  const symbol = String(merged.quoteSymbol || '').trim().toUpperCase();
+  if (!symbol) {
+    if (prev && !prev.quoteSymbol) return body; // inversión antigua sin vincular: se mantiene
+    throw bad('Busca el valor en el mercado para que su precio sea real. Si no cotiza (un depósito, un plan privado…), elige el tipo «Depósito» u «Otro».');
+  }
+  if (!SYMBOL_RE.test(symbol)) throw bad('Símbolo de mercado no válido.');
+  const out = { ...body, quoteSymbol: symbol };
+  delete out.currentPrice; // el precio lo pone el mercado
+  if (prev && prev.quoteSymbol === symbol && body.quoteSymbol === undefined) return out;
+  if (prev && prev.quoteSymbol === symbol && prev.priceAt) return out;
+  let q;
+  try {
+    q = await marketQuote(symbol, db.settings.currency || 'EUR');
+  } catch (err) {
+    throw bad(`No se pudo obtener la cotización de ${symbol}: ${err.message}`);
+  }
+  Object.assign(out, quoteFields(q));
+  if (!merged.name) out.name = q.name;
+  return out;
+}
+
+function quoteFields(q) {
+  return {
+    currentPrice: q.price,
+    prevClose: q.prevClose,
+    dayChangePct: q.dayChangePct,
+    nativeCurrency: q.nativeCurrency,
+    nativePrice: q.nativePrice,
+    marketName: q.name,
+    exchange: q.exchange,
+    priceAt: q.time || new Date().toISOString(),
+    spark: q.spark,
+    priceUpdatedAt: todayISO()
+  };
+}
+
 let refreshing = null;
 async function refreshPrices(ids) {
   if (refreshing) return refreshing;
   refreshing = (async () => {
     const target = db.settings.currency || 'EUR';
-    const list = db.investments.filter((i) => (!ids || ids.includes(i.id)) && quoteSymbolFor(i, target));
     const results = [];
-    for (const inv of list) {
+    for (const inv of db.investments) {
+      if ((ids && !ids.includes(inv.id)) || !isMarketLinked(inv)) continue;
       try {
-        const { price, source, symbol } = await fetchQuote(inv, target);
+        const fields = quoteFields(await marketQuote(inv.quoteSymbol, target));
         const current = db.investments.find((x) => x.id === inv.id);
-        if (current) {
-          current.currentPrice = round6(price);
-          current.priceUpdatedAt = todayISO();
-          current.priceSource = source;
-          current.updatedAt = new Date().toISOString();
-        }
-        results.push({ id: inv.id, name: inv.name, ok: true, price: round6(price), symbol });
+        if (current) Object.assign(current, fields, { priceSource: MARKET_SOURCE, updatedAt: new Date().toISOString() });
+        results.push({ id: inv.id, name: inv.name, ok: true, price: fields.currentPrice, symbol: inv.quoteSymbol });
       } catch (err) {
         results.push({ id: inv.id, name: inv.name, ok: false, error: err.message });
       }
+    }
+    // Operaciones sin comprobar (de versiones anteriores o de ejemplo): se compara su precio con el del mercado ese día.
+    let checked = 0;
+    for (const op of db.ops) {
+      if (checked >= 25) break;
+      if (op.market || !['buy', 'sell'].includes(op.type)) continue;
+      const inv = db.investments.find((i) => i.id === op.investmentId);
+      if (!isMarketLinked(inv) || (ids && !ids.includes(inv.id))) continue;
+      checked += 1;
+      try {
+        const ctx = await marketPriceOn(inv.quoteSymbol, op.date, target);
+        const current = db.ops.find((x) => x.id === op.id);
+        if (!current) continue;
+        current.market = { ...ctx, checkedAt: new Date().toISOString() };
+        if (current.demo) { current.price = ctx.close; current.priceMode = 'market'; }
+        else if (current.priceMode === 'pending') current.priceMode = 'execution';
+        else if (!current.priceMode) current.priceMode = 'manual';
+      } catch { /* se reintentará en la próxima actualización */ }
     }
     db.settings.pricesRefreshedAt = new Date().toISOString();
     return results;
@@ -1636,6 +1935,11 @@ async function handleApi(req, res, pathname) {
     }
     if (body.locale !== undefined) db.settings.locale = validLocale(body.locale, db.settings.locale);
     if (body.autoPrices !== undefined) db.settings.autoPrices = Boolean(body.autoPrices);
+    if (body.marketProxy !== undefined) {
+      const proxy = String(body.marketProxy || '').trim().slice(0, 300);
+      if (proxy && !/^https:\/\/[^\s]+$/i.test(proxy)) throw bad('El intermediario debe ser una dirección https://');
+      db.settings.marketProxy = proxy;
+    }
     if (body.profile !== undefined) {
       if (!PROFILES.includes(body.profile)) throw bad('Perfil no válido.');
       db.settings.profile = body.profile;
@@ -1693,6 +1997,28 @@ async function handleApi(req, res, pathname) {
     db = state;
     runRecurring();
     return json(res, 200, { ...commit(), imported: counts });
+  }
+
+  if (pathname === '/api/market/search' && method === 'POST') {
+    const body = await readJson(req);
+    try { return json(res, 200, { results: await marketSearch(body.q) }); }
+    catch (err) { throw bad(err.message); }
+  }
+
+  if (pathname === '/api/market/quote' && method === 'POST') {
+    const body = await readJson(req);
+    const symbol = String(body.symbol || '').trim().toUpperCase();
+    if (!SYMBOL_RE.test(symbol)) throw bad('Símbolo no válido.');
+    try { return json(res, 200, { quote: await marketQuote(symbol, db.settings.currency || 'EUR') }); }
+    catch (err) { throw bad(err.message); }
+  }
+
+  if (pathname === '/api/market/price' && method === 'POST') {
+    const body = await readJson(req);
+    const symbol = String(body.symbol || '').trim().toUpperCase();
+    if (!SYMBOL_RE.test(symbol)) throw bad('Símbolo no válido.');
+    try { return json(res, 200, { price: await marketPriceOn(symbol, String(body.date || ''), db.settings.currency || 'EUR') }); }
+    catch (err) { throw bad(err.message); }
   }
 
   if (pathname === '/api/prices/refresh' && method === 'POST') {
@@ -1778,7 +2104,9 @@ async function handleApi(req, res, pathname) {
   if (!COLLECTIONS.includes(col)) throw new HttpError(404, 'Ruta no encontrada.');
 
   if (method === 'POST' && !id) {
-    const body = await readJson(req);
+    let body = await readJson(req);
+    if (col === 'ops') body = await prepareMarketOp(body);
+    if (col === 'investments') body = await prepareMarketInvestment(body);
     const item = sanitizeByCollection(col, body, null);
     item.updatedAt = new Date().toISOString();
     db[col].push(item);
@@ -1793,8 +2121,10 @@ async function handleApi(req, res, pathname) {
   if ((method === 'PATCH' || method === 'PUT') && id) {
     const index = db[col].findIndex((item) => item.id === id);
     if (index < 0) throw new HttpError(404, 'No existe.');
-    const body = await readJson(req);
+    let body = await readJson(req);
     const prev = db[col][index];
+    if (col === 'ops') body = await prepareMarketOp(body, prev);
+    if (col === 'investments') body = await prepareMarketInvestment(body, prev);
     if (col === 'categories' && body.kind && body.kind !== prev.kind && db.transactions.some((t) => t.categoryId === id)) {
       throw bad('No puedes cambiar el tipo de una categoría que ya tiene movimientos.');
     }
@@ -1951,8 +2281,8 @@ setInterval(() => { try { runRecurringAndSave(); } catch { /* reintenta en la pr
 /** Si el usuario lo ha activado, actualiza las cotizaciones una vez al día. */
 async function autoRefreshPrices() {
   if (!db.settings.autoPrices || !db.investments.length) return;
-  const last = String(db.settings.pricesRefreshedAt || '').slice(0, 10);
-  if (last === todayISO()) return;
+  const last = Date.parse(db.settings.pricesRefreshedAt || '') || 0;
+  if (Date.now() - last < 30 * 60 * 1000) return;
   try {
     const results = await refreshPrices(null);
     commit();
@@ -1971,5 +2301,5 @@ server.listen(LISTEN_PORT, '0.0.0.0', () => {
   console.log('\n  Para detener el servidor: Ctrl+C\n');
   setTimeout(() => openBrowser(local), 400);
   setTimeout(autoRefreshPrices, 5000).unref();
-  setInterval(autoRefreshPrices, 60 * 60 * 1000).unref();
+  setInterval(autoRefreshPrices, 30 * 60 * 1000).unref();
 });

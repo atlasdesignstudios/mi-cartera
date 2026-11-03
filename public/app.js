@@ -1,9 +1,10 @@
 /* Mi Cartera — aplicación (sin dependencias) */
 'use strict';
 import * as F from './fiscal.js';
+import { GLYPHS, glyphSVG, normalizeGlyph } from './glyphs.js';
 
 const STORAGE_KEY = 'micartera.state.v1';
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 // En la versión web (GitHub Pages) no hay servidor: los datos viven en este navegador.
 const WEB = Boolean(globalThis.MC_WEB);
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'MXN', 'ARS', 'COP', 'CLP', 'PEN', 'BRL', 'UYU', 'JPY'];
@@ -20,7 +21,7 @@ const INVEST_TYPES = {
   other: { label: 'Otro', color: '#aab0b6' }
 };
 const TX_LABELS = { income: 'Ingreso', expense: 'Gasto', transfer: 'Transferencia' };
-const EMOJIS = ['🏠', '🛒', '🚗', '🍽️', '💊', '🎬', '🛍️', '📺', '📚', '✈️', '🐾', '🧾', '📦', '💼', '🧑‍💻', '📈', '🏦', '🏷️', '🎁', '➕', '⚡', '🎵', '🏋️', '☕', '🎓', '🔧'];
+const CATEGORY_GLYPHS = ['home', 'cart', 'car', 'fuel', 'utensils', 'coffee', 'pill', 'heart', 'dumbbell', 'film', 'music', 'bag', 'tv', 'wifi', 'phone', 'bolt', 'droplet', 'book', 'graduation', 'plane', 'umbrella', 'paw', 'baby', 'gift', 'receipt', 'invoice', 'shield', 'wrench', 'briefcase', 'laptop', 'trend', 'bank', 'coins', 'card', 'tag', 'globe', 'star', 'box', 'plusCircle'];
 const PALETTE = ['#0e9f6e', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16', '#64748b', '#f97316'];
 /* Colores de categoría en pantalla: se apagan (baja saturación) y los violetas y rosas quedan casi grises.
    Los datos guardados no cambian. */
@@ -335,7 +336,7 @@ function spendingByCategory(key) {
       const cat = categoryById(id);
       return {
         id, value: round(value),
-        name: cat?.name || 'Otros', icon: cat?.icon || '📦', color: tone(cat?.color || '#94a3b8')
+        name: cat?.name || 'Otros', icon: cat?.icon || 'box', color: tone(cat?.color || '#94a3b8')
       };
     })
     .sort((a, b) => b.value - a.value);
@@ -375,7 +376,7 @@ function txMeta(tx) {
 function txIconColor(tx) {
   if (tx.type === 'transfer') return { icon: 'transfer', bg: '#6b7280', emoji: false };
   const cat = categoryById(tx.categoryId);
-  return { icon: cat?.icon || '📦', bg: cat?.color || '#94a3b8', emoji: true };
+  return { icon: cat?.icon || 'box', bg: cat?.color || '#94a3b8', emoji: true };
 }
 
 /* ---------------------------------------------------------------- tema */
@@ -650,6 +651,7 @@ async function boot() {
       return;
     }
     setTimeout(maybeAutoRefreshPrices, 1500);
+    if (!boot.priceTimer) boot.priceTimer = setInterval(maybeAutoRefreshPrices, 5 * 60 * 1000);
   } catch (err) {
     if (!document.getElementById('lock')?.hidden) return;
     const cached = readCache();
@@ -707,7 +709,7 @@ function donutChart(rows, total) {
   let offset = 0;
   const segments = rows.slice(0, 4);
   const rest = sum(rows.slice(4), (row) => row.value);
-  if (rest > 0) segments.push({ name: 'Otros', value: rest, color: '#94a3b8', icon: '📦' });
+  if (rest > 0) segments.push({ name: 'Otros', value: rest, color: '#94a3b8', icon: 'box' });
   let svg = `<svg viewBox="0 0 ${size} ${size}" class="chart" role="img" aria-label="Gastos por categoría">`;
   svg += `<circle cx="${cx}" cy="${cx}" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="${stroke}"/>`;
   for (const seg of segments) {
@@ -819,7 +821,7 @@ function txRow(tx) {
   const sign = tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : '';
   const amountClass = tx.type === 'income' ? 'income' : tx.type === 'transfer' ? 'transfer' : '';
   return `<button type="button" class="txrow" data-action="edit-tx" data-id="${esc(tx.id)}">
-    <span class="tx-icon" style="background:${visual.bg}1f;color:${visual.bg}">${visual.emoji ? esc(visual.icon) : icon(visual.icon, 18)}</span>
+    <span class="tx-icon" style="background:${visual.bg}1f;color:${visual.bg}">${visual.emoji ? glyphSVG(visual.icon, 18) : icon(visual.icon, 18)}</span>
     <span class="tx-main">
       <span class="tx-title">${esc(txTitle(tx))}</span>
       <span class="tx-meta">${esc(txMeta(tx))}</span>
@@ -831,7 +833,7 @@ function txRow(tx) {
 function budgetMiniRow(row) {
   const pct = clamp(row.pct, 0, 1);
   return `<div class="budget-row">
-    <span class="budget-icon" style="background:${tone(row.color)}1f;color:${tone(row.color)}">${esc(row.icon)}</span>
+    <span class="budget-icon" style="background:${tone(row.color)}1f;color:${tone(row.color)}">${glyphSVG(row.icon, 18)}</span>
     <div class="budget-info">
       <div class="budget-line"><b>${esc(row.name)}</b><span>${esc(money(row.spent, { decimals: 0 }))} de ${esc(money(row.budget, { decimals: 0 }))}</span></div>
       <div class="progress ${progressClass(row.pct)}"><i style="width:${(pct * 100).toFixed(1)}%"></i></div>
@@ -911,7 +913,7 @@ function viewResumen() {
         <div><h2>Gastos por categoría</h2><p>${esc(monthLabel(now))}</p></div>
         <a class="card-link" href="#/movimientos">Ver todo ${icon('arrowRight', 14)}</a>
       </div>
-      ${spendTotal > 0 ? donutChart(spend, spendTotal) : `<div class="empty"><span class="empty-icon">📊</span><h3>Sin gastos este mes</h3><p>Cuando registres gastos verás aquí el reparto por categorías.</p></div>`}
+      ${spendTotal > 0 ? donutChart(spend, spendTotal) : `<div class="empty"><span class="empty-icon">${icon('pie', 24)}</span><h3>Sin gastos este mes</h3><p>Cuando registres gastos verás aquí el reparto por categorías.</p></div>`}
     </section>
   </div>
 
@@ -924,7 +926,7 @@ function viewResumen() {
       </div>
       ${recent.length
         ? `<div class="txlist compact">${recent.map(txRow).join('')}</div>`
-        : `<div class="empty"><span class="empty-icon">🧾</span><h3>Aún no hay movimientos</h3><p>Registra tu primer ingreso o gasto para empezar.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-tx">Añadir movimiento</button></div>`}
+        : `<div class="empty"><span class="empty-icon">${icon('receipt', 24)}</span><h3>Aún no hay movimientos</h3><p>Registra tu primer ingreso o gasto para empezar.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-tx">Añadir movimiento</button></div>`}
     </section>` : '',
     moduleOn('budgets') ? `    <section class="card">
       <div class="card-head">
@@ -933,7 +935,7 @@ function viewResumen() {
       </div>
       ${budgets.length
         ? budgets.map(budgetMiniRow).join('')
-        : `<div class="empty"><span class="empty-icon">🎯</span><h3>Ponte un límite mensual</h3><p>Define cuánto quieres gastar en cada categoría y sigue tu progreso.</p><button class="btn btn-soft btn-sm" type="button" data-action="edit-budgets">Crear presupuesto</button></div>`}
+        : `<div class="empty"><span class="empty-icon">${icon('target', 24)}</span><h3>Ponte un límite mensual</h3><p>Define cuánto quieres gastar en cada categoría y sigue tu progreso.</p><button class="btn btn-soft btn-sm" type="button" data-action="edit-budgets">Crear presupuesto</button></div>`}
     </section>` : '',
     moduleOn('recurring') ? `    <section class="card">
       <div class="card-head">
@@ -943,7 +945,7 @@ function viewResumen() {
       ${upcoming.length
         ? `<div class="txlist compact">${upcoming.slice(0, 5).map((u) => ruleRow(u.rule, u.date, true)).join('')}</div>
            <div class="upcoming-foot"><span>Previsto en 30 días</span><b class="${upcomingNet < 0 ? 'neg' : 'pos'}">${upcomingNet >= 0 ? '+' : '−'}${esc(money(Math.abs(upcomingNet)))}</b></div>`
-        : `<div class="empty"><span class="empty-icon">🔁</span><h3>Sin recurrentes</h3><p>Programa tu nómina, el alquiler o las suscripciones y se apuntarán solos.</p><button class="btn btn-soft btn-sm" type="button" data-action="new-recurring">Crear recurrente</button></div>`}
+        : `<div class="empty"><span class="empty-icon">${icon('repeat', 24)}</span><h3>Sin recurrentes</h3><p>Programa tu nómina, el alquiler o las suscripciones y se apuntarán solos.</p><button class="btn btn-soft btn-sm" type="button" data-action="new-recurring">Crear recurrente</button></div>`}
     </section>` : '',
     moduleOn('goals') ? `    <section class="card">
       <div class="card-head">
@@ -952,14 +954,14 @@ function viewResumen() {
       </div>
       ${goals.length
         ? goals.slice(0, 4).map((g) => `<button type="button" class="budget-row goal-mini" data-action="edit-goal" data-id="${esc(g.id)}">
-            <span class="budget-icon" style="background:${tone(g.color)}1f;color:${tone(g.color)}">${esc(g.icon)}</span>
+            <span class="budget-icon" style="background:${tone(g.color)}1f;color:${tone(g.color)}">${glyphSVG(g.icon, 18, 'target')}</span>
             <div class="budget-info">
               <div class="budget-line"><b>${esc(g.name)}</b><span>${esc(money(g.saved, { decimals: 0 }))} de ${esc(money(g.target, { decimals: 0 }))}</span></div>
               <div class="progress${g.reached ? ' done' : ''}"><i style="width:${(clamp(g.pct, 0, 1) * 100).toFixed(1)}%;background:${tone(g.color)}"></i></div>
             </div>
             <span class="budget-amount"><b>${esc(percent(g.pct, 0))}</b>${g.reached ? 'conseguido' : g.perMonth ? esc(money(g.perMonth, { decimals: 0 })) + '/mes' : 'progreso'}</span>
           </button>`).join('')
-        : `<div class="empty"><span class="empty-icon">🏁</span><h3>Define un objetivo</h3><p>Fondo de emergencia, viaje, coche… y sigue cuánto te falta.</p><button class="btn btn-soft btn-sm" type="button" data-action="new-goal">Crear objetivo</button></div>`}
+        : `<div class="empty"><span class="empty-icon">${icon('flag', 24)}</span><h3>Define un objetivo</h3><p>Fondo de emergencia, viaje, coche… y sigue cuánto te falta.</p><button class="btn btn-soft btn-sm" type="button" data-action="new-goal">Crear objetivo</button></div>`}
     </section>` : ''
   ])}`;
 }
@@ -991,9 +993,9 @@ function viewMovimientos() {
   const f = ui.filters;
   const categories = store.data.categories;
   const expenseOptions = categories.filter((c) => c.kind === 'expense')
-    .map((c) => `<option value="${esc(c.id)}"${f.category === c.id ? ' selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('');
+    .map((c) => `<option value="${esc(c.id)}"${f.category === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
   const incomeOptions = categories.filter((c) => c.kind === 'income')
-    .map((c) => `<option value="${esc(c.id)}"${f.category === c.id ? ' selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('');
+    .map((c) => `<option value="${esc(c.id)}"${f.category === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
   const accountOptions = store.data.accounts
     .map((a) => `<option value="${esc(a.id)}"${f.account === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
 
@@ -1068,7 +1070,7 @@ function renderTxList() {
   }
   if (!list.length) {
     const any = store.data.transactions.length > 0;
-    host.innerHTML = `<div class="empty"><span class="empty-icon">${any ? '🔎' : '🧾'}</span>
+    host.innerHTML = `<div class="empty"><span class="empty-icon">${icon(any ? 'search' : 'receipt', 24)}</span>
       <h3>${any ? 'Ningún movimiento coincide' : 'Aún no hay movimientos'}</h3>
       <p>${any ? 'Prueba a cambiar los filtros o la búsqueda.' : 'Registra tu primer ingreso o gasto y empieza a ver tu dinero con claridad.'}</p>
       <button class="btn ${any ? 'btn-ghost' : 'btn-primary'} btn-sm" type="button" data-action="${any ? 'clear-filters' : 'new-tx'}">${any ? 'Limpiar filtros' : 'Añadir movimiento'}</button>
@@ -1113,28 +1115,110 @@ function allocationBar(data) {
     <div class="alloc-legend">${data.map((d) => `<span><i style="background:${d.color}"></i>${esc(d.label)} ${esc(percent(d.value / total, 0))}</span>`).join('')}</div>`;
 }
 
+/* ---------------------------------------------------------------- mercado */
+// Acciones, ETF, fondos y cripto se valoran siempre con el precio real del mercado (Yahoo Finance).
+const MARKET_TYPES = ['stock', 'etf', 'fund', 'crypto'];
+function marketLinked(inv) { return Boolean(inv && MARKET_TYPES.includes(inv.type) && inv.quoteSymbol); }
+function needsMarketLink(inv) { return Boolean(inv && MARKET_TYPES.includes(inv.type) && !inv.quoteSymbol); }
+function pctLabel(p, decimals = 2) {
+  const n = Number(p) || 0;
+  const abs = Math.abs(n).toLocaleString(locale(), { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${abs} %`;
+}
+function changeChip(p, suffix = '') {
+  if (p === null || p === undefined || p === '' || !Number.isFinite(Number(p))) return '';
+  const up = Number(p) >= 0;
+  return `<span class="chg ${up ? 'up' : 'down'}">${icon(up ? 'arrowUpRight' : 'arrowDown', 12)}${esc(pctLabel(p))}${suffix ? ` <small>${esc(suffix)}</small>` : ''}</span>`;
+}
+function nativeMoney(value, currency) {
+  try {
+    return new Intl.NumberFormat(locale(), { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: value < 10 ? 4 : 2 }).format(value);
+  } catch { return `${value} ${currency}`; }
+}
+function sparkline(values, { width = 132, height = 36 } = {}) {
+  const v = (values || []).map(Number).filter((n) => n > 0);
+  if (v.length < 2) return '';
+  const min = Math.min(...v);
+  const span = Math.max(...v) - min || 1;
+  const pts = v.map((n, i) => `${((i / (v.length - 1)) * width).toFixed(1)},${(height - 2 - ((n - min) / span) * (height - 4)).toFixed(1)}`).join(' ');
+  const up = v[v.length - 1] >= v[0];
+  return `<svg class="spark ${up ? 'up' : 'down'}" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+function agoLabel(iso) {
+  const t = Date.parse(iso || '');
+  if (!t) return '';
+  const min = Math.round((Date.now() - t) / 60000);
+  if (min < 1) return 'ahora mismo';
+  if (min < 60) return `hace ${min} min`;
+  const d = new Date(t);
+  if (d.toDateString() === new Date().toDateString()) return `hoy a las ${d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })}`;
+  return d.toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+/** Lectura del momento de la compra o venta: cómo iba el valor ese día y el mes anterior. */
+function entryContext(op, m = op.market) {
+  if (!m) return null;
+  const buy = op.type === 'buy';
+  const d = m.dayChangePct;
+  const t = m.trend30Pct;
+  const hasD = d !== null && d !== undefined;
+  const hasT = t !== null && t !== undefined;
+  let verdict = '';
+  let tone = 'neutral';
+  if (hasT && Math.abs(t) >= 5) {
+    const falling = t < 0;
+    verdict = `${buy ? 'Compraste' : 'Vendiste'} ${falling ? 'tras una caída' : 'tras una subida'} (${pctLabel(t, 1)} en el mes anterior)`;
+    tone = buy ? (falling ? 'good' : 'warn') : (falling ? 'warn' : 'good');
+  } else if (hasD) {
+    verdict = `${buy ? 'Compraste' : 'Vendiste'} en un día de ${d < 0 ? 'bajada' : 'subida'} (${pctLabel(d, 1)})${hasT ? `, con el mes anterior ${Math.abs(t) < 2 ? 'estable' : t < 0 ? 'algo a la baja' : 'algo al alza'} (${pctLabel(t, 1)})` : ''}`;
+  }
+  const price = Number(op.price) || 0;
+  const outOfRange = m.low > 0 && m.high > 0 && (price < m.low * 0.985 || price > m.high * 1.015);
+  const dev = m.close > 0 ? (price / m.close - 1) * 100 : 0;
+  return { verdict, tone, outOfRange, dev };
+}
+function priceModeTag(op, inv) {
+  if (!marketLinked(inv)) return '';
+  if (op.priceMode === 'market') return '<span class="badge">Cierre de mercado</span>';
+  if (op.priceMode === 'execution') return '<span class="badge">Precio de ejecución</span>';
+  if (op.priceMode === 'pending') return '<span class="badge badge--warn">Pendiente de comprobar</span>';
+  return '<span class="badge badge--warn">Precio a mano</span>';
+}
+
 function holdingCard(h) {
   const meta = INVEST_TYPES[h.type] || INVEST_TYPES.other;
   const up = h.pnl >= 0;
+  const linked = marketLinked(h);
+  const dayEur = linked && h.prevClose > 0 && h.units > 0 ? round(h.units * (h.currentPrice - h.prevClose)) : null;
+  const foreign = linked && h.nativeCurrency && h.nativeCurrency !== currencyCode() && h.nativePrice > 0;
   return `<article class="card holding">
     <div class="holding-head">
       <span class="asset-badge" style="background:${meta.color}20;color:${meta.color}">${esc(meta.label)}</span>
       <button class="icon-btn" type="button" data-action="edit-investment" data-id="${esc(h.id)}" aria-label="Editar ${esc(h.name)}">${icon('edit', 17)}</button>
     </div>
     <h3>${esc(h.name)}</h3>
-    <div class="symbol">${esc(h.symbol || 'SIN SÍMBOLO')}</div>
+    <div class="symbol">${esc(h.quoteSymbol || h.symbol || 'SIN SÍMBOLO')}${h.exchange ? ` · ${esc(h.exchange)}` : ''}</div>
     <div class="holding-value">${esc(money(h.value))}</div>
-    <span class="pnl ${up ? 'up' : 'down'}">${icon(up ? 'arrowUpRight' : 'arrowDown', 13)}${up ? '+' : ''}${esc(money(h.pnl))} · ${esc(percent(h.pnlPct))}</span>
+    <span class="pnl ${up ? 'up' : 'down'}">${icon(up ? 'arrowUpRight' : 'arrowDown', 13)}${up ? '+' : ''}${esc(money(h.pnl))} · ${esc(percent(h.pnlPct))} desde que compraste</span>
+    ${linked ? `<div class="holding-market">
+      <div class="holding-price">
+        <span>Precio de mercado</span>
+        <b>${esc(money(h.currentPrice))}</b>
+        ${changeChip(h.dayChangePct, 'hoy')}
+      </div>
+      ${sparkline(h.spark)}
+    </div>
+    <p class="holding-src">${foreign ? `${esc(nativeMoney(h.nativePrice, h.nativeCurrency))} al cambio · ` : ''}Yahoo Finance · ${esc(agoLabel(h.priceAt) || 'sin consultar')}</p>`
+    : needsMarketLink(h) ? `<div class="holding-warn">${icon('alert', 15)}<span>Precio puesto a mano: puede no ser real. <button type="button" class="link-btn" data-action="edit-investment" data-id="${esc(h.id)}">Vincúlalo al mercado</button></span></div>` : ''}
     <dl class="metrics">
       <div><dt>Unidades</dt><dd>${esc(unitsLabel(h.units))}</dd></div>
       <div><dt>Precio medio</dt><dd>${esc(money(h.avg))}</dd></div>
-      <div><dt>Precio actual</dt><dd>${esc(money(h.currentPrice))}</dd></div>
+      ${dayEur !== null ? `<div><dt>Hoy</dt><dd class="${dayEur >= 0 ? 'num-up' : 'num-down'}">${dayEur >= 0 ? '+' : ''}${esc(money(dayEur))}</dd></div>` : `<div><dt>Precio actual</dt><dd>${esc(money(h.currentPrice))}</dd></div>`}
     </dl>
     ${h.units <= 0 ? '<div class="holding-empty">Sin posición abierta. Solo hay operaciones registradas.</div>' : ''}
     <div class="holding-actions">
       <button class="btn btn-sm btn-ghost" type="button" data-action="new-op" data-id="${esc(h.id)}">${icon('plus', 14)} Operación</button>
       <button class="btn btn-sm btn-ghost" type="button" data-action="history" data-id="${esc(h.id)}">${icon('list', 14)} Historial</button>
-      <button class="icon-btn" type="button" data-action="update-price" data-id="${esc(h.id)}" aria-label="Actualizar precio">${icon('refresh', 17)}</button>
+      <button class="icon-btn" type="button" data-action="update-price" data-id="${esc(h.id)}" aria-label="${linked ? 'Actualizar cotización' : 'Actualizar precio'}" title="${linked ? 'Actualizar cotización' : 'Actualizar precio'}">${icon('refresh', 17)}</button>
     </div>
   </article>`;
 }
@@ -1144,15 +1228,28 @@ function opRow(op) {
   if (!inv) return '';
   const buy = op.type === 'buy';
   const total = round(op.units * op.price + (buy ? 1 : -1) * (op.fees || 0));
+  const ctx = marketLinked(inv) ? entryContext(op) : null;
+  const since = buy && marketLinked(inv) && op.price > 0 && inv.currentPrice > 0 ? (inv.currentPrice / op.price - 1) * 100 : null;
   return `<button type="button" class="history-row" data-action="edit-op" data-id="${esc(op.id)}">
     <span class="tx-icon" style="width:32px;height:32px;border-radius:10px;background:${buy ? 'var(--accent-soft)' : 'var(--danger-soft)'};color:${buy ? 'var(--accent-2)' : 'var(--danger)'}">${icon(buy ? 'arrowDown' : 'arrowUp', 15)}</span>
     <span class="tx-main">
       <span class="tx-title">${esc(inv.name)} <span class="tiny">${buy ? 'Compra' : 'Venta'} · ${esc(unitsLabel(op.units))} u.</span></span>
-      <span class="tx-meta">${esc(dateLabel(op.date))}${op.note ? ' · ' + esc(op.note) : ''}</span>
+      <span class="tx-meta">${esc(dateLabel(op.date))}${ctx?.verdict ? ' · ' + esc(ctx.verdict) : op.note ? ' · ' + esc(op.note) : ''}</span>
     </span>
-    <span class="side"><b>${esc(money(total))}</b><small>${esc(money(op.price))} / u.${op.accountId ? ' · ' + esc(accountById(op.accountId)?.name || '') : ''}</small></span>
+    <span class="side"><b>${esc(money(total))}</b><small>${esc(money(op.price))} / u.${since !== null ? ` · ${esc(pctLabel(since, 1))} desde entonces` : op.accountId ? ' · ' + esc(accountById(op.accountId)?.name || '') : ''}</small></span>
     <span style="color:var(--muted-2)">${icon('chevronRight', 16)}</span>
   </button>`;
+}
+
+function portfolioDay(holdings) {
+  let change = 0;
+  let base = 0;
+  for (const h of holdings) {
+    if (!marketLinked(h) || !(h.prevClose > 0) || !(h.units > 0)) continue;
+    change += h.units * (h.currentPrice - h.prevClose);
+    base += h.units * h.prevClose;
+  }
+  return base > 0 ? { change: round(change), pct: (change / base) * 100 } : null;
 }
 
 function viewInversiones() {
@@ -1160,20 +1257,26 @@ function viewInversiones() {
   const totals = portfolioTotals(holdings);
   const alloc = allocationData(holdings);
   const up = totals.pnl >= 0;
+  const day = portfolioDay(holdings);
+  const anyLinked = (store.data.investments || []).some(marketLinked);
+  const unlinked = (store.data.investments || []).filter(needsMarketLink);
   const recentOps = [...(store.data.ops || [])]
     .sort((a, b) => (b.date === a.date ? (b.createdAt || '').localeCompare(a.createdAt || '') : b.date.localeCompare(a.date)))
     .slice(0, 6);
+  const refreshed = store.data.settings?.pricesRefreshedAt;
 
   return `
   ${store.offline ? `<div class="banner">${icon('alert', 17)}<span><b>Sin conexión.</b> Mostrando la última copia guardada.</span></div>` : ''}
   <div class="viewhead">
-    <div><h1>Inversiones</h1><p>Tu cartera, sus aportaciones y lo que está ganando.</p></div>
+    <div><h1>Inversiones</h1><p>${anyLinked ? `Valoradas con el precio real del mercado${refreshed ? ` · actualizado ${esc(agoLabel(refreshed))}` : ''}.` : 'Tu cartera, sus aportaciones y lo que está ganando.'}</p></div>
     <div class="head-actions">
-      ${(store.data.investments || []).some(quotable) ? `<button class="btn btn-ghost" type="button" data-action="refresh-prices" title="Consulta los precios actuales en internet">${icon('refresh', 16)} Cotizaciones</button>` : ''}
+      ${anyLinked ? `<button class="btn btn-ghost" type="button" data-action="refresh-prices" title="Consulta los precios actuales del mercado">${icon('refresh', 16)} Actualizar precios</button>` : ''}
       <button class="btn btn-ghost" type="button" data-action="new-op">${icon('plus', 16)} Operación</button>
       <button class="btn btn-primary" type="button" data-action="new-investment">${icon('plus', 16)} Nueva inversión</button>
     </div>
   </div>
+
+  ${unlinked.length ? `<div class="banner banner--warn">${icon('alert', 17)}<span><b>${unlinked.length === 1 ? `${esc(unlinked[0].name)} tiene` : `${unlinked.length} inversiones tienen`} el precio puesto a mano.</b> Edítala${unlinked.length === 1 ? '' : 's'} y búscala en el mercado para que su valor sea real.</span><button class="btn btn-sm btn-ghost" type="button" data-action="edit-investment" data-id="${esc(unlinked[0].id)}">Vincular</button></div>` : ''}
 
   ${holdings.length ? `
   <section class="hero hero--invest">
@@ -1181,6 +1284,7 @@ function viewInversiones() {
       <div class="hero-label">Valor actual de la cartera</div>
       <div class="hero-value">${bigMoney(totals.value)}</div>
       <span class="pnl ${up ? 'up' : 'down'}">${icon(up ? 'arrowUpRight' : 'arrowDown', 14)}${up ? '+' : ''}${esc(money(totals.pnl))} no realizado · ${esc(percent(totals.pnlPct))}</span>
+      ${day ? `<span class="pnl ${day.change >= 0 ? 'up' : 'down'} pnl-day">Hoy ${day.change >= 0 ? '+' : ''}${esc(money(day.change))} · ${esc(pctLabel(day.pct))}</span>` : ''}
       <div class="portfolio-stats">
         <div class="portfolio-stat"><span>Aportado</span><b>${esc(money(totals.cost))}</b></div>
         <div class="portfolio-stat"><span>Ganancia latente</span><b>${up ? '+' : ''}${esc(money(totals.pnl))}</b></div>
@@ -1196,19 +1300,20 @@ function viewInversiones() {
   <div class="holding-grid">${holdings.map(holdingCard).join('')}</div>
 
   ${recentOps.length ? `<section class="card">
-    <div class="card-head"><div><h2>Últimas operaciones</h2><p>Compras y ventas registradas</p></div></div>
+    <div class="card-head"><div><h2>Últimas operaciones</h2><p>Con el precio del mercado de cada día y cómo iba el valor cuando compraste</p></div></div>
     <div class="history-list">${recentOps.map(opRow).join('')}</div>
   </section>` : ''}
+  <p class="tiny legal-note">Cotizaciones de Yahoo Finance con el retraso habitual (unos 15 minutos en bolsa). Los valores en otra moneda se convierten al cambio del día. Información orientativa, no es asesoramiento financiero.</p>
   ` : `<section class="card">
     <div class="empty">
-      <span class="empty-icon">📈</span>
+      <span class="empty-icon">${icon('trend', 26)}</span>
       <h3>Empieza tu cartera</h3>
-      <p>Añade cada inversión (acciones, fondos, cripto, depósitos…) y registra tus compras. Calcularemos unidades, precio medio y ganancias por ti.</p>
+      <p>Busca tus acciones, ETF, fondos indexados o criptomonedas por nombre, ticker o ISIN. El precio sale siempre del mercado, también el del día en que compraste.</p>
       <button class="btn btn-primary" type="button" data-action="new-investment">${icon('plus', 16)} Añadir inversión</button>
     </div>
     <div class="settings-grid" style="margin-top:16px">
-      <div class="banner">${icon('sparkles', 17)}<span><b>1.</b> Crea la inversión con su precio actual.</span></div>
-      <div class="banner">${icon('sparkles', 17)}<span><b>2.</b> Añade cada compra o venta como operación.</span></div>
+      <div class="banner">${icon('search', 17)}<span><b>1.</b> Busca el valor (por ejemplo Apple, IWDA o IE00B03HD191).</span></div>
+      <div class="banner">${icon('calendar', 17)}<span><b>2.</b> Registra tus compras con su fecha: usamos el precio real de ese día.</span></div>
     </div>
   </section>`}`;
 }
@@ -1244,7 +1349,7 @@ function viewCuentas() {
       <div class="acct-note">${esc(a.note || 'Sin notas')}</div>
       <div class="acct-foot"><span>Saldo inicial ${esc(money(a.initialBalance))}</span><span>${esc(String(ACCOUNT_TYPES[a.type] || 'Cuenta').toLowerCase())}</span></div>
     </button>`).join('')}
-  </div>` : `<section class="card"><div class="empty"><span class="empty-icon">🏦</span><h3>Sin cuentas todavía</h3><p>Crea una cuenta para poder registrar ingresos, gastos y transferencias.</p><button class="btn btn-primary" type="button" data-action="new-account">Crear cuenta</button></div></section>`}
+  </div>` : `<section class="card"><div class="empty"><span class="empty-icon">${icon('bank', 24)}</span><h3>Sin cuentas todavía</h3><p>Crea una cuenta para poder registrar ingresos, gastos y transferencias.</p><button class="btn btn-primary" type="button" data-action="new-account">Crear cuenta</button></div></section>`}
   <p class="tiny">El saldo se calcula automáticamente: saldo inicial + ingresos − gastos ± transferencias.</p>`;
 }
 
@@ -1298,7 +1403,7 @@ function viewPresupuestos() {
     ${rows.length ? rows.map((row) => {
       const hasBudget = row.budget > 0;
       return `<div class="budget-row">
-        <span class="budget-icon" style="background:${tone(row.color)}1f;color:${tone(row.color)}">${esc(row.icon)}</span>
+        <span class="budget-icon" style="background:${tone(row.color)}1f;color:${tone(row.color)}">${glyphSVG(row.icon, 18)}</span>
         <div class="budget-info">
           <div class="budget-line"><b>${esc(row.name)}</b><span>${hasBudget ? `${esc(money(row.spent, { decimals: 0 }))} de ${esc(money(row.budget, { decimals: 0 }))}` : `${esc(money(row.spent, { decimals: 0 }))} gastados · sin límite`}</span></div>
           ${hasBudget ? `<div class="progress ${progressClass(row.pct)}"><i style="width:${(clamp(row.pct, 0, 1) * 100).toFixed(1)}%"></i></div>` : ''}
@@ -1307,7 +1412,7 @@ function viewPresupuestos() {
           ${hasBudget ? `<b>${esc(money(row.remaining, { decimals: 0 }))}</b>${row.remaining < 0 ? 'excedido' : 'restante'}` : `<b>${esc(money(row.spent, { decimals: 0 }))}</b>gastado`}
         </span>
       </div>`;
-    }).join('') : `<div class="empty"><span class="empty-icon">🎯</span><h3>No hay categorías de gasto</h3><p>Crea categorías en Ajustes para poder presupuestar.</p><a class="btn btn-soft btn-sm" href="#/ajustes">Ir a Ajustes</a></div>`}
+    }).join('') : `<div class="empty"><span class="empty-icon">${icon('target', 24)}</span><h3>No hay categorías de gasto</h3><p>Crea categorías en Ajustes para poder presupuestar.</p><a class="btn btn-soft btn-sm" href="#/ajustes">Ir a Ajustes</a></div>`}
   </section>`;
 }
 
@@ -1365,7 +1470,7 @@ function ruleMeta(rule) {
 function ruleVisual(rule) {
   if (rule.type === 'transfer') return { emoji: false, icon: 'transfer', bg: '#6b7280' };
   const cat = categoryById(rule.categoryId);
-  return { emoji: true, icon: cat?.icon || '📦', bg: cat?.color || '#94a3b8' };
+  return { emoji: true, icon: cat?.icon || 'box', bg: cat?.color || '#94a3b8' };
 }
 function ruleRow(rule, date, compact = false) {
   const v = ruleVisual(rule);
@@ -1373,7 +1478,7 @@ function ruleRow(rule, date, compact = false) {
   const cls = rule.type === 'income' ? 'income' : rule.type === 'transfer' ? 'transfer' : '';
   const paused = rule.active === false;
   return `<button type="button" class="txrow${paused ? ' is-paused' : ''}" data-action="edit-recurring" data-id="${esc(rule.id)}">
-    <span class="tx-icon" style="background:${v.bg}1f;color:${v.bg}">${v.emoji ? esc(v.icon) : icon(v.icon, 18)}</span>
+    <span class="tx-icon" style="background:${v.bg}1f;color:${v.bg}">${v.emoji ? glyphSVG(v.icon, 18) : icon(v.icon, 18)}</span>
     <span class="tx-main">
       <span class="tx-title">${esc(ruleTitle(rule))}${paused ? ' <span class="badge">en pausa</span>' : ''}</span>
       <span class="tx-meta">${compact ? esc(dateLabel(date)) + ' · ' : ''}${esc(ruleMeta(rule))}</span>
@@ -1422,10 +1527,10 @@ function viewRecurrentes() {
     <section class="card">
       <div class="card-head"><div><h2>Próximos 45 días</h2><p>Lo que se apuntará automáticamente</p></div></div>
       ${upcoming.length ? `<div class="txlist compact">${upcoming.slice(0, 14).map((u) => ruleRow(u.rule, u.date, true)).join('')}</div>`
-        : `<div class="empty"><span class="empty-icon">🗓️</span><h3>Nada a la vista</h3><p>No hay cobros ni pagos programados en las próximas semanas.</p></div>`}
+        : `<div class="empty"><span class="empty-icon">${icon('calendar', 24)}</span><h3>Nada a la vista</h3><p>No hay cobros ni pagos programados en las próximas semanas.</p></div>`}
     </section>
   </div>` : `<section class="card"><div class="empty">
-    <span class="empty-icon">🔁</span>
+    <span class="empty-icon">${icon('repeat', 24)}</span>
     <h3>Automatiza lo que se repite</h3>
     <p>Crea un recurrente para tu nómina, el alquiler o una suscripción. Cada vez que llegue la fecha se añadirá el movimiento solo.</p>
     <button class="btn btn-primary btn-sm" type="button" data-action="new-recurring">${icon('plus', 14)} Crear recurrente</button>
@@ -1459,14 +1564,14 @@ function goalCard(g) {
     : (g.reached ? 'Conseguido' : 'Sin fecha límite');
   return `<article class="card goal" style="--c:${tone(g.color)}">
     <div class="goal-head">
-      <span class="goal-icon">${esc(g.icon)}</span>
+      <span class="goal-icon" style="color:${tone(g.color)}">${glyphSVG(g.icon, 22, 'target')}</span>
       <div class="goal-title"><h3>${esc(g.name)}</h3><span>${g.account ? 'Saldo de ' + esc(g.account.name) : 'Aportaciones manuales'}</span></div>
       <button class="icon-btn" type="button" data-action="edit-goal" data-id="${esc(g.id)}" aria-label="Editar ${esc(g.name)}">${icon('edit', 17)}</button>
     </div>
     <div class="goal-amounts"><b>${esc(money(g.saved, { decimals: 0 }))}</b><span>de ${esc(money(g.target, { decimals: 0 }))}</span><em>${esc(percent(g.pct, 0))}</em></div>
     <div class="progress goal-bar${g.reached ? ' done' : ''}"><i style="width:${(pct * 100).toFixed(1)}%"></i></div>
     <div class="goal-foot">
-      <span>${g.reached ? '🎉 ' : ''}${esc(deadlineText)}</span>
+      <span>${g.reached ? icon('check', 13) + ' ' : ''}${esc(deadlineText)}</span>
       ${!g.reached ? `<span>Faltan ${esc(money(g.remaining, { decimals: 0 }))}</span>` : ''}
     </div>
     ${g.note ? `<p class="goal-note">${esc(g.note)}</p>` : ''}
@@ -1493,7 +1598,7 @@ function viewObjetivos() {
     ${statCard('Necesitas apartar', bigMoney(perMonth), '<span>Al mes para llegar a tiempo</span>', 'expense', 'calendar')}
   </div>
   <div class="goal-grid">${goals.map(goalCard).join('')}</div>` : `<section class="card"><div class="empty">
-    <span class="empty-icon">🎯</span>
+    <span class="empty-icon">${icon('target', 24)}</span>
     <h3>¿Para qué estás ahorrando?</h3>
     <p>Un fondo de emergencia, un viaje, la entrada de un piso… Vincúlalo a una cuenta de ahorro y el progreso se actualiza solo.</p>
     <button class="btn btn-primary btn-sm" type="button" data-action="new-goal">${icon('plus', 14)} Crear objetivo</button>
@@ -1647,15 +1752,15 @@ function viewInformes() {
         <div><h2>Evolución del patrimonio</h2><p>Efectivo + inversiones al cierre de cada mes</p></div>
         ${worthPoints.length > 1 ? `<span class="delta ${worthEnd >= worthStart ? 'up' : 'down'}">${icon(worthEnd >= worthStart ? 'arrowUp' : 'arrowDown', 12)}${esc(money(worthEnd - worthStart, { decimals: 0 }))}</span>` : ''}
       </div>
-      ${worthPoints.length ? lineChart(worthPoints, { label: 'Patrimonio neto por mes' }) : `<div class="empty"><span class="empty-icon">📉</span><h3>Sin datos</h3><p>Este año aún no ha empezado.</p></div>`}
+      ${worthPoints.length ? lineChart(worthPoints, { label: 'Patrimonio neto por mes' }) : `<div class="empty"><span class="empty-icon">${icon('chart', 24)}</span><h3>Sin datos</h3><p>Este año aún no ha empezado.</p></div>`}
       <p class="tiny" style="margin-top:6px">Meses cerrados: inversiones a precio de coste. Mes actual: a valor de mercado.</p>
     </section>
   </div>
 
   ${(bestMonth || topCat || invested || withdrawn) ? `<div class="insights">
-    ${bestMonth ? `<div class="insight"><span>🏆</span><div><b>Mejor mes</b><p>${esc(monthLabel(bestMonth.key))}: ahorraste ${esc(money(bestMonth.net, { decimals: 0 }))}.</p></div></div>` : ''}
-    ${topCat ? `<div class="insight"><span>${esc(topCat.cat?.icon || '📦')}</span><div><b>Mayor gasto</b><p>${esc(topCat.cat?.name || 'Otros')}: ${esc(money(topCat.value, { decimals: 0 }))} (${esc(percent(topCat.share, 0))} del total).</p></div></div>` : ''}
-    ${(invested || withdrawn) ? `<div class="insight"><span>📈</span><div><b>Inversión</b><p>Aportaste ${esc(money(invested, { decimals: 0 }))}${withdrawn ? ` y retiraste ${esc(money(withdrawn, { decimals: 0 }))}` : ''} este año.</p></div></div>` : ''}
+    ${bestMonth ? `<div class="insight"><span>${glyphSVG('star', 18)}</span><div><b>Mejor mes</b><p>${esc(monthLabel(bestMonth.key))}: ahorraste ${esc(money(bestMonth.net, { decimals: 0 }))}.</p></div></div>` : ''}
+    ${topCat ? `<div class="insight"><span>${glyphSVG(topCat.cat?.icon, 18)}</span><div><b>Mayor gasto</b><p>${esc(topCat.cat?.name || 'Otros')}: ${esc(money(topCat.value, { decimals: 0 }))} (${esc(percent(topCat.share, 0))} del total).</p></div></div>` : ''}
+    ${(invested || withdrawn) ? `<div class="insight"><span>${icon('trend', 18)}</span><div><b>Inversión</b><p>Aportaste ${esc(money(invested, { decimals: 0 }))}${withdrawn ? ` y retiraste ${esc(money(withdrawn, { decimals: 0 }))}` : ''} este año.</p></div></div>` : ''}
   </div>` : ''}
 
   <section class="card">
@@ -1679,18 +1784,18 @@ function viewInformes() {
   <div class="grid-2">
     <section class="card">
       <div class="card-head"><div><h2>Gastos por categoría</h2><p>Total del año y media mensual</p></div></div>
-      ${expenseRows.length ? expenseRows.map((r) => catBarRow(r, divisor)).join('') : `<div class="empty"><span class="empty-icon">🧾</span><h3>Sin gastos en ${year}</h3></div>`}
+      ${expenseRows.length ? expenseRows.map((r) => catBarRow(r, divisor)).join('') : `<div class="empty"><span class="empty-icon">${icon('receipt', 24)}</span><h3>Sin gastos en ${year}</h3></div>`}
     </section>
     <section class="card">
       <div class="card-head"><div><h2>Fuentes de ingreso</h2><p>De dónde viene tu dinero</p></div></div>
-      ${incomeRows.length ? incomeRows.map((r) => catBarRow(r, divisor)).join('') : `<div class="empty"><span class="empty-icon">💼</span><h3>Sin ingresos en ${year}</h3></div>`}
+      ${incomeRows.length ? incomeRows.map((r) => catBarRow(r, divisor)).join('') : `<div class="empty"><span class="empty-icon">${glyphSVG('briefcase', 24)}</span><h3>Sin ingresos en ${year}</h3></div>`}
     </section>
   </div>`;
 }
 function catBarRow(r, divisor) {
-  const cat = r.cat || { icon: '📦', name: 'Otros', color: '#94a3b8' };
+  const cat = r.cat || { icon: 'box', name: 'Otros', color: '#94a3b8' };
   return `<div class="budget-row">
-    <span class="budget-icon" style="background:${tone(cat.color)}1f;color:${tone(cat.color)}">${esc(cat.icon)}</span>
+    <span class="budget-icon" style="background:${tone(cat.color)}1f;color:${tone(cat.color)}">${glyphSVG(cat.icon, 18)}</span>
     <div class="budget-info">
       <div class="budget-line"><b>${esc(cat.name)}</b><span>${esc(percent(r.share, 0))} · ${esc(money(r.value / divisor, { decimals: 0 }))}/mes</span></div>
       <div class="progress"><i style="width:${(clamp(r.share, 0, 1) * 100).toFixed(1)}%;background:${tone(cat.color)}"></i></div>
@@ -1766,7 +1871,7 @@ function categoryGroups() {
       <h3>${kind === 'expense' ? 'Gastos' : 'Ingresos'}</h3>
       <div class="cat-list">
         ${list.map((c) => `<button type="button" class="cat-item" data-action="edit-category" data-id="${esc(c.id)}">
-          <span class="cat-emoji" style="background:${tone(c.color)}1f">${esc(c.icon)}</span>
+          <span class="cat-emoji" style="background:${tone(c.color)}1f;color:${tone(c.color)}">${glyphSVG(c.icon, 17)}</span>
           <span class="cat-name">${esc(c.name)}</span>
           ${kind === 'expense' ? `<span class="cat-budget">${c.budget > 0 ? esc(money(c.budget, { decimals: 0 })) : 'sin límite'}</span>` : ''}
         </button>`).join('')}
@@ -1879,9 +1984,9 @@ function viewAjustes() {
 
     <section class="card setting-card">
       <h2>Cotizaciones</h2>
-      <p>${WEB ? 'En la versión web solo se pueden actualizar criptomonedas (CoinGecko). Las bolsas no permiten consultas desde el navegador: usa la app del ordenador para acciones y ETF.' : 'Actualiza el precio de acciones, ETF y cripto desde Yahoo Finance. Para fondos, indica su símbolo de cotización.'}</p>
+      <p>Acciones, ETF, fondos indexados y cripto se valoran con el precio real del mercado (Yahoo Finance), y cada compra se comprueba con el precio de ese día.${WEB ? ' En la versión web las consultas pasan por un intermediario público porque Yahoo no permite llamadas directas desde el navegador.' : ''}</p>
       <div class="setting-row">
-        <div><h3>Precios automáticos</h3><p>Una vez al día, al abrir la app. Desactivado, Mi Cartera no se conecta a internet.</p></div>
+        <div><h3>Precios automáticos</h3><p>Cada 15 minutos mientras la app está abierta. Desactivado, solo se consulta cuando pulsas Actualizar o registras una operación.</p></div>
         <div class="seg" role="group" aria-label="Precios automáticos">
           <button type="button" data-action="auto-prices" data-value="off" class="${s.autoPrices ? '' : 'active'}">No</button>
           <button type="button" data-action="auto-prices" data-value="on" class="${s.autoPrices ? 'active' : ''}">Sí</button>
@@ -1891,7 +1996,12 @@ function viewAjustes() {
         <div><h3>Actualizar ahora</h3><p>${s.pricesRefreshedAt ? `Última consulta: ${esc(new Date(s.pricesRefreshedAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}.` : 'Aún no se ha consultado ninguna cotización.'}</p></div>
         <button class="btn btn-ghost btn-sm" type="button" data-action="refresh-prices">${icon('refresh', 14)} Actualizar</button>
       </div>
-      <p class="tiny" style="margin-top:8px">Solo se envía el símbolo (por ejemplo IWDA.AS). Nunca tus importes ni ningún dato personal.</p>
+      ${WEB ? `<form class="setting-row" data-proxy-form>
+        <div><h3>Intermediario propio (opcional)</h3><p>Si el público falla a menudo, pega aquí la dirección de tu propio intermediario (en el README hay uno listo para Cloudflare, gratis). Usa <code>{url}</code> donde va la consulta o se añadirá al final.</p>
+          <input class="input" name="marketProxy" type="url" placeholder="https://mi-proxy.workers.dev/?url=" value="${esc(s.marketProxy || '')}" style="margin-top:8px"></div>
+        <button class="btn btn-ghost btn-sm" type="submit">Guardar</button>
+      </form>` : ''}
+      <p class="tiny" style="margin-top:8px">Solo se envía el símbolo (por ejemplo IWDA.AS) y la fecha. Nunca tus importes ni ningún dato personal.</p>
     </section>
 
     <section class="card setting-card">
@@ -2061,7 +2171,7 @@ function openTransactionModal(tx = null, presetType, draft = null) {
   const accountOptions = (selected) => accounts.map((a) => `<option value="${esc(a.id)}"${(selected || accounts[0]?.id) === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
   const categoryOptions = (kind, selected) => store.data.categories
     .filter((c) => c.kind === kind)
-    .map((c) => `<option value="${esc(c.id)}"${selected === c.id ? ' selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('');
+    .map((c) => `<option value="${esc(c.id)}"${selected === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
   const defaultTarget = accounts.find((a) => a.id !== (src.accountId || accounts[0]?.id))?.id || accounts[0]?.id;
 
   openSheet({
@@ -2227,7 +2337,7 @@ function openAccountModal(account = null) {
 /* ---------------------------------------------------------------- modal: categoría */
 function openCategoryModal(category = null, kind = 'expense') {
   let currentKind = category?.kind || kind;
-  const initialIcon = category?.icon || (currentKind === 'income' ? '💼' : '🛒');
+  const initialIcon = normalizeGlyph(category?.icon, currentKind === 'income' ? 'briefcase' : 'cart');
   const color = category?.color || PALETTE[Math.floor(Math.random() * PALETTE.length)];
   openSheet({
     title: category ? 'Editar categoría' : 'Nueva categoría',
@@ -2244,7 +2354,7 @@ function openCategoryModal(category = null, kind = 'expense') {
       <div class="field"><span>Icono</span>
         <input type="hidden" name="icon" value="${esc(initialIcon)}">
         <div class="emoji-grid" data-emoji-grid>
-          ${EMOJIS.map((emoji) => `<button type="button" data-emoji="${esc(emoji)}" class="${emoji === initialIcon ? 'active' : ''}">${emoji}</button>`).join('')}
+          ${CATEGORY_GLYPHS.map((key) => `<button type="button" data-emoji="${key}" class="${key === initialIcon ? 'active' : ''}" title="${esc(GLYPHS[key].label)}" aria-label="${esc(GLYPHS[key].label)}">${glyphSVG(key, 20)}</button>`).join('')}
         </div>
       </div>
       <div class="field"><span>Color</span>${swatchesHTML(color)}</div>
@@ -2275,7 +2385,7 @@ function openCategoryModal(category = null, kind = 'expense') {
       const payload = {
         kind: formData.get('kind'),
         name: String(formData.get('name') || '').trim(),
-        icon: formData.get('icon') || '📦',
+        icon: formData.get('icon') || 'box',
         color: formData.get('color') || color,
         budget: payloadNumber(formData.get('budget'))
       };
@@ -2323,7 +2433,7 @@ function openBudgetModal() {
     body: `
       <p class="seg-note">Estos límites se repiten todos los meses. Deja 0 si no quieres poner límite.</p>
       <div class="form-grid">
-        ${categories.map((c) => `<div class="field"><span>${esc(c.icon)} ${esc(c.name)}</span>
+        ${categories.map((c) => `<div class="field"><span class="field-glyph"><i style="color:${tone(c.color)}">${glyphSVG(c.icon, 15)}</i>${esc(c.name)}</span>
           <input name="budget_${esc(c.id)}" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(c.budget || 0)}">
         </div>`).join('')}
       </div>`,
@@ -2345,54 +2455,155 @@ function openBudgetModal() {
 function openInvestmentModal(investment = null) {
   let type = investment?.type || 'etf';
   let color = investment?.color || INVEST_TYPES[type].color;
+  let picked = investment?.quoteSymbol
+    ? { symbol: investment.quoteSymbol, name: investment.marketName || investment.name, exchange: investment.exchange || '', type }
+    : null;
+  let found = [];
+  let timer = null;
+  let seq = 0;
+  const isMarket = () => MARKET_TYPES.includes(type);
   openSheet({
     title: investment ? 'Editar inversión' : 'Nueva inversión',
-    subtitle: 'Las unidades y el precio medio salen de las operaciones que registres.',
+    subtitle: 'Búscala en el mercado y Mi Cartera usará su precio real.',
     submitLabel: investment ? 'Guardar cambios' : 'Crear inversión',
     dangerLabel: investment ? 'Eliminar' : '',
     body: `
-      <div class="field"><span>Nombre</span><input name="name" maxlength="80" placeholder="Ej. MSCI World" value="${esc(investment?.name || '')}" required></div>
-      <div class="form-grid">
-        <div class="field"><span>Símbolo <span class="hint">(opcional)</span></span><input name="symbol" maxlength="16" placeholder="IWDA" value="${esc(investment?.symbol || '')}"></div>
-        <div class="field"><span>Tipo</span><select name="type">
-          ${Object.entries(INVEST_TYPES).map(([value, meta]) => `<option value="${value}"${type === value ? ' selected' : ''}>${esc(meta.label)}</option>`).join('')}
-        </select></div>
+      <div class="field"><span>Tipo</span><select name="type">
+        ${Object.entries(INVEST_TYPES).map(([value, meta]) => `<option value="${value}"${type === value ? ' selected' : ''}>${esc(meta.label)}</option>`).join('')}
+      </select></div>
+      <div data-market-block${isMarket() ? '' : ' hidden'}>
+        <div class="field"><span>Busca el valor</span>
+          <div class="search-field">${icon('search', 16)}<input name="q" type="search" autocomplete="off" spellcheck="false" placeholder="Nombre, ticker o ISIN · Ej. Apple, IWDA, IE00B03HD191"></div>
+        </div>
+        <div class="mkt-results" data-mkt-results></div>
+        <div data-mkt-picked></div>
       </div>
-      <div class="field"><span>Símbolo de cotización <span class="hint">(opcional, para actualizar el precio solo)</span></span><input name="quoteSymbol" maxlength="24" placeholder="${WEB ? 'BTC, ETH… (solo cripto en la web)' : 'Ej. IWDA.AS · AAPL · SAN.MC · BTC-EUR'}" value="${esc(investment?.quoteSymbol || '')}" autocapitalize="characters" spellcheck="false"></div>
-      <div class="form-grid">
-        <div class="field"><span>Precio actual por unidad</span><input name="currentPrice" type="number" min="0" step="any" inputmode="decimal" value="${investment ? esc(investment.currentPrice) : ''}" placeholder="0,00" required></div>
-        <div class="field"><span>Última actualización</span><input name="priceDate" type="date" value="${esc(investment?.priceUpdatedAt || todayISO())}"></div>
+      <div class="field"><span>Nombre</span><input name="name" maxlength="80" placeholder="Ej. MSCI World" value="${esc(investment?.name || '')}" required></div>
+      <div data-manual-block${isMarket() ? ' hidden' : ''}>
+        <div class="form-grid">
+          <div class="field"><span>Valor actual por unidad</span><input name="currentPrice" type="number" min="0" step="any" inputmode="decimal" value="${investment && !isMarket() ? esc(investment.currentPrice) : ''}" placeholder="0,00"></div>
+          <div class="field"><span>Fecha del valor</span><input name="priceDate" type="date" value="${esc(investment?.priceUpdatedAt || todayISO())}"></div>
+        </div>
+        <p class="seg-note">Los depósitos y otros activos que no cotizan se valoran con el importe que indiques.</p>
       </div>
       <div class="field"><span>Nota <span class="hint">(opcional)</span></span><input name="note" maxlength="300" placeholder="Ej. Aportación mensual automatizada" value="${esc(investment?.note || '')}"></div>
       <input type="hidden" name="color" value="${esc(color)}">
-      <p class="seg-note">Después de crearla, usa <b>Operación</b> para registrar compras o ventas.</p>
     `,
     onMount(dialog) {
       const select = dialog.querySelector('select[name="type"]');
       const hidden = dialog.querySelector('input[name="color"]');
+      const marketBlock = dialog.querySelector('[data-market-block]');
+      const manualBlock = dialog.querySelector('[data-manual-block]');
+      const q = dialog.querySelector('input[name="q"]');
+      const results = dialog.querySelector('[data-mkt-results]');
+      const pickedEl = dialog.querySelector('[data-mkt-picked]');
+      const nameInput = dialog.querySelector('input[name="name"]');
+      if (!investment) nameInput.dataset.auto = '1';
+      const toggle = () => {
+        marketBlock.hidden = !isMarket();
+        manualBlock.hidden = isMarket();
+      };
+      const renderPicked = async () => {
+        if (!picked) { pickedEl.innerHTML = ''; return; }
+        pickedEl.innerHTML = `<div class="mkt-picked">
+          <span class="mkt-picked-main"><b>${esc(picked.name)}</b><span>${esc(picked.symbol)}${picked.exchange ? ` · ${esc(picked.exchange)}` : ''}</span></span>
+          <span class="mkt-picked-live" data-live>Consultando precio…</span>
+          <button type="button" class="btn btn-sm btn-ghost" data-unpick>Cambiar</button>
+        </div>`;
+        const live = pickedEl.querySelector('[data-live]');
+        const symbol = picked.symbol;
+        try {
+          const { quote } = await api('POST', 'api/market/quote', { symbol });
+          if (picked?.symbol !== symbol) return;
+          live.innerHTML = `<b>${esc(money(quote.price))}</b> ${changeChip(quote.dayChangePct, 'hoy')}`;
+        } catch (err) {
+          live.innerHTML = `<span class="tiny">${esc(err.message)}</span>`;
+        }
+      };
+      const pick = (r) => {
+        picked = r;
+        if (r.type && r.type !== type && INVEST_TYPES[r.type]) {
+          type = r.type;
+          select.value = type;
+          color = INVEST_TYPES[type].color;
+          hidden.value = color;
+        }
+        if (nameInput.dataset.auto || !nameInput.value.trim()) { nameInput.value = r.name; nameInput.dataset.auto = '1'; }
+        results.innerHTML = '';
+        q.value = '';
+        renderPicked();
+      };
       select.addEventListener('change', () => {
         type = select.value;
         color = INVEST_TYPES[type]?.color || '#8b5cf6';
         hidden.value = color;
+        toggle();
       });
+      nameInput.addEventListener('input', () => { delete nameInput.dataset.auto; });
+      q.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        if (found[0]) pick(found[0]);
+      });
+      q.addEventListener('input', () => {
+        clearTimeout(timer);
+        const term = q.value.trim();
+        if (term.length < 2) { results.innerHTML = ''; found = []; return; }
+        results.innerHTML = '<p class="tiny mkt-status">Buscando en el mercado…</p>';
+        timer = setTimeout(async () => {
+          const mine = ++seq;
+          try {
+            const { results: list } = await api('POST', 'api/market/search', { q: term });
+            if (mine !== seq) return;
+            found = list || [];
+            results.innerHTML = found.length
+              ? found.map((r, i) => `<button type="button" class="mkt-result" data-pick="${i}">
+                  <span><b>${esc(r.name)}</b><span>${esc(r.symbol)}${r.exchange ? ` · ${esc(r.exchange)}` : ''}</span></span>
+                  <span class="asset-badge" style="background:${INVEST_TYPES[r.type]?.color || '#8b5cf6'}20;color:${INVEST_TYPES[r.type]?.color || '#8b5cf6'}">${esc(INVEST_TYPES[r.type]?.label || '')}</span>
+                </button>`).join('')
+              : '<p class="tiny mkt-status">No hay resultados. Prueba con el ticker (AAPL) o el ISIN del fondo.</p>';
+          } catch (err) {
+            if (mine === seq) results.innerHTML = `<p class="tiny mkt-status">${esc(err.message)}</p>`;
+          }
+        }, 350);
+      });
+      results.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-pick]');
+        if (btn && found[Number(btn.dataset.pick)]) pick(found[Number(btn.dataset.pick)]);
+      });
+      pickedEl.addEventListener('click', (event) => {
+        if (!event.target.closest('[data-unpick]')) return;
+        picked = null;
+        renderPicked();
+        q.focus();
+      });
+      toggle();
+      renderPicked();
     },
     async onSubmit(formData) {
       const payload = {
         name: String(formData.get('name') || '').trim(),
-        symbol: String(formData.get('symbol') || '').trim(),
-        quoteSymbol: String(formData.get('quoteSymbol') || '').trim().toUpperCase(),
-        type: formData.get('type'),
-        currentPrice: payloadNumber(formData.get('currentPrice')),
-        priceUpdatedAt: formData.get('priceDate') || todayISO(),
+        type,
         note: String(formData.get('note') || ''),
         color: formData.get('color') || color
       };
+      if (isMarket()) {
+        if (!picked) throw new Error('Busca el valor y elígelo de la lista para usar su precio real del mercado.');
+        payload.quoteSymbol = picked.symbol;
+        payload.symbol = type === 'fund' ? '' : picked.symbol.split(/[.=]/)[0].replace(/-[A-Z]{3}$/, '').slice(0, 16);
+        if (!payload.name) payload.name = picked.name;
+      } else {
+        payload.quoteSymbol = '';
+        payload.symbol = investment?.symbol || '';
+        payload.currentPrice = payloadNumber(formData.get('currentPrice'));
+        payload.priceUpdatedAt = formData.get('priceDate') || todayISO();
+        if (!(payload.currentPrice >= 0)) throw new Error('El valor no puede ser negativo.');
+      }
       if (!payload.name) throw new Error('Ponle un nombre a la inversión.');
-      if (payload.currentPrice < 0) throw new Error('El precio no puede ser negativo.');
       if (investment) await api('PATCH', `api/investments/${investment.id}`, payload);
       else await api('POST', 'api/investments', payload);
       render();
-      toast(investment ? 'Inversión actualizada' : 'Inversión creada. Añade ahora sus operaciones.');
+      toast(investment ? 'Inversión actualizada' : isMarket() ? 'Inversión creada con su precio de mercado. Añade ahora tus compras.' : 'Inversión creada. Añade ahora sus operaciones.');
     },
     async onDanger(dialog) {
       const count = store.data.ops.filter((o) => o.investmentId === investment.id).length;
@@ -2423,7 +2634,7 @@ function openRecurringModal(rule = null, preset = {}) {
   const accountOptions = (selected) => accounts.map((a) => `<option value="${esc(a.id)}"${(selected || accounts[0]?.id) === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
   const categoryOptions = (kind, selected) => store.data.categories
     .filter((c) => c.kind === kind)
-    .map((c) => `<option value="${esc(c.id)}"${selected === c.id ? ' selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('');
+    .map((c) => `<option value="${esc(c.id)}"${selected === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
   const src = rule || preset;
   const defaultTarget = accounts.find((a) => a.id !== (src.accountId || accounts[0]?.id))?.id || accounts[0]?.id;
   const generated = rule ? store.data.transactions.filter((t) => t.recurringId === rule.id).length : 0;
@@ -2535,10 +2746,10 @@ function openRecurringModal(rule = null, preset = {}) {
 }
 
 /* ---------------------------------------------------------------- modal: objetivo */
-const GOAL_EMOJIS = ['🎯', '🛟', '✈️', '🏠', '🚗', '💍', '🎓', '💻', '🏖️', '👶', '🐶', '🎸', '🏍️', '📱', '🏦', '🎁'];
+const GOAL_GLYPHS = ['target', 'lifebuoy', 'plane', 'umbrella', 'home', 'car', 'bike', 'ring', 'graduation', 'laptop', 'baby', 'paw', 'music', 'phone', 'bank', 'gift', 'heart', 'star'];
 function openGoalModal(goal = null) {
   const color = goal?.color || PALETTE[(store.data.goals || []).length % PALETTE.length];
-  const initialIcon = goal?.icon || '🎯';
+  const initialIcon = normalizeGlyph(goal?.icon, 'target');
   let linked = Boolean(goal?.accountId);
   openSheet({
     title: goal ? 'Editar objetivo' : 'Nuevo objetivo',
@@ -2549,7 +2760,7 @@ function openGoalModal(goal = null) {
       <div class="field"><span>Nombre</span><input name="name" maxlength="60" placeholder="Ej. Fondo de emergencia" value="${esc(goal?.name || '')}" required></div>
       <div class="field"><span>Icono</span>
         <input type="hidden" name="icon" value="${esc(initialIcon)}">
-        <div class="emoji-grid" data-emoji-grid>${GOAL_EMOJIS.map((e) => `<button type="button" data-emoji="${esc(e)}" class="${e === initialIcon ? 'active' : ''}">${e}</button>`).join('')}</div>
+        <div class="emoji-grid" data-emoji-grid>${GOAL_GLYPHS.map((key) => `<button type="button" data-emoji="${key}" class="${key === initialIcon ? 'active' : ''}" title="${esc(GLYPHS[key].label)}" aria-label="${esc(GLYPHS[key].label)}">${glyphSVG(key, 20)}</button>`).join('')}</div>
       </div>
       <div class="form-grid">
         <div class="field"><span>Cantidad objetivo</span><input name="target" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00" value="${goal ? esc(goal.target) : ''}" required></div>
@@ -2578,7 +2789,7 @@ function openGoalModal(goal = null) {
     async onSubmit(formData) {
       const payload = {
         name: String(formData.get('name') || '').trim(),
-        icon: formData.get('icon') || '🎯',
+        icon: formData.get('icon') || 'target',
         target: payloadNumber(formData.get('target')),
         deadline: formData.get('deadline') || null,
         accountId: formData.get('accountId') || null,
@@ -2628,6 +2839,21 @@ function openGoalAmountModal(goal, mode = 'add') {
 }
 
 /* ---------------------------------------------------------------- modal: operación */
+function marketBoxHTML(ctx, op, inv) {
+  const moved = ctx.tradeDate !== ctx.date;
+  const info = entryContext(op, ctx);
+  const since = op.type === 'buy' && inv.currentPrice > 0 && ctx.close > 0 ? (inv.currentPrice / ctx.close - 1) * 100 : null;
+  return `<div class="mkt-box-head">
+      <span>Cierre del ${esc(fmtDate(ctx.tradeDate))}${moved ? ' <small>(último día con mercado abierto)</small>' : ''}</span>
+      <b>${esc(money(ctx.close))}</b>
+    </div>
+    <div class="mkt-box-row"><span>Rango de ese día</span><b>${esc(money(ctx.low))} – ${esc(money(ctx.high))}</b></div>
+    <div class="mkt-box-row"><span>Ese día</span>${changeChip(ctx.dayChangePct) || '<span class="tiny">sin dato</span>'}</div>
+    <div class="mkt-box-row"><span>Mes anterior</span>${changeChip(ctx.trend30Pct) || '<span class="tiny">sin dato</span>'}</div>
+    ${info?.verdict ? `<p class="mkt-verdict mkt-verdict--${info.tone}">${esc(info.verdict)}.</p>` : ''}
+    ${since !== null ? `<p class="mkt-since">Desde entonces ${changeChip(since)} <span class="tiny">· precio actual ${esc(money(inv.currentPrice))}</span></p>` : ''}`;
+}
+
 function openOpModal(investmentId = null, op = null) {
   if (!store.data.investments.length) {
     toast('Crea primero una inversión.', 'error');
@@ -2638,19 +2864,25 @@ function openOpModal(investmentId = null, op = null) {
   let selectedId = op?.investmentId || investmentId || investments[0].id;
   const fixed = Boolean(op || investmentId);
   let opType = op?.type || 'buy';
+  let qtyMode = 'units';
+  let ctx = null;
+  let ctxSeq = 0;
+  const inv = () => investmentById(selectedId);
+  const linked = () => marketLinked(inv());
   const currentHolding = () => computeHoldings().find((h) => h.id === selectedId);
-  const investmentOptions = () => investments.map((inv) => `<option value="${esc(inv.id)}"${selectedId === inv.id ? ' selected' : ''}>${esc(inv.name)}${inv.symbol ? ` (${esc(inv.symbol)})` : ''}</option>`).join('');
+  const investmentOptions = () => investments.map((i) => `<option value="${esc(i.id)}"${selectedId === i.id ? ' selected' : ''}>${esc(i.name)}${i.symbol ? ` (${esc(i.symbol)})` : ''}</option>`).join('');
   const lastAccount = [...store.data.ops].filter((o) => o.investmentId === selectedId && o.accountId).sort((a, b) => b.date.localeCompare(a.date))[0]?.accountId;
   const accountId = op ? op.accountId || '' : lastAccount || '';
+  const execInit = op ? op.priceMode !== 'market' : false;
 
   openSheet({
     title: op ? 'Editar operación' : 'Registrar operación',
-    subtitle: 'Una compra suma unidades; una venta las reduce y calcula la ganancia realizada.',
+    subtitle: 'El precio sale del mercado el día de la operación.',
     submitLabel: op ? 'Guardar cambios' : 'Guardar operación',
     dangerLabel: op ? 'Eliminar' : '',
     body: `
       ${fixed
-        ? `<div class="banner">${icon('trend', 17)}<span><b>${esc(investmentById(selectedId)?.name || '')}</b> · <span data-op-units>${esc(unitsLabel(currentHolding()?.units || 0))} unidades</span></span></div>`
+        ? `<div class="banner">${icon('trend', 17)}<span><b>${esc(inv()?.name || '')}</b> · <span data-op-units>${esc(unitsLabel(currentHolding()?.units || 0))} unidades</span></span></div>`
         : `<div class="field"><span>Inversión</span><select name="investmentId" data-op-investment>${investmentOptions()}</select></div>`}
       <div class="seg seg--full" data-seg="op-type">
         <button type="button" data-op-type="buy" class="${opType === 'buy' ? 'active' : ''}">Compra</button>
@@ -2658,38 +2890,98 @@ function openOpModal(investmentId = null, op = null) {
       </div>
       <input type="hidden" name="type" value="${opType}">
       <div class="form-grid">
-        <div class="field"><span>Unidades</span><input name="units" type="number" min="0" step="any" inputmode="decimal" placeholder="0" value="${op ? esc(op.units) : ''}" required></div>
-        <div class="field"><span>Precio por unidad</span><input name="price" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00" value="${op ? esc(op.price) : ''}" required></div>
+        <div class="field"><span>Fecha</span><input name="date" type="date" max="${todayISO()}" value="${esc(op?.date || todayISO())}"></div>
+        <div class="field"><span>Comisiones</span><input name="fees" type="number" min="0" step="0.01" inputmode="decimal" value="${op ? esc(op.fees || 0) : '0'}"></div>
+      </div>
+      <div class="mkt-box" data-mkt-box hidden></div>
+      <div class="seg seg--full" data-seg="qty-mode" hidden>
+        <button type="button" data-qty="units" class="active">Por unidades</button>
+        <button type="button" data-qty="amount">Por importe</button>
       </div>
       <div class="form-grid">
-        <div class="field"><span>Comisiones</span><input name="fees" type="number" min="0" step="0.01" inputmode="decimal" value="${op ? esc(op.fees || 0) : '0'}"></div>
-        <div class="field"><span>Fecha</span><input name="date" type="date" value="${esc(op?.date || todayISO())}"></div>
+        <div class="field" data-units-field><span>Unidades</span><input name="units" type="number" min="0" step="any" inputmode="decimal" placeholder="0" value="${op ? esc(op.units) : ''}"></div>
+        <div class="field" data-amount-field hidden><span data-amount-label>Importe invertido</span><input name="amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0,00"></div>
+        <div class="field"><span data-price-label>Precio por unidad</span><input name="price" type="number" min="0" step="any" inputmode="decimal" placeholder="0,00" value="${op ? esc(op.price) : ''}"></div>
       </div>
+      <label class="checkbox" data-exec-wrap hidden><input type="checkbox" name="execution" value="1"${execInit ? ' checked' : ''}> Mi bróker me dio otro precio ese día (precio de ejecución)</label>
       <div class="field"><span>Cuenta de cargo / abono</span><select name="accountId">
         <option value="">Ninguna (no mueve efectivo)</option>
         ${store.data.accounts.map((a) => `<option value="${esc(a.id)}"${accountId === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}
       </select></div>
       <div class="field"><span>Nota <span class="hint">(opcional)</span></span><input name="note" maxlength="300" placeholder="Ej. Aportación mensual" value="${esc(op?.note || '')}"></div>
-      ${op ? '' : '<label class="checkbox"><input type="checkbox" name="syncPrice" value="1"> Usar este precio como precio actual de la inversión</label>'}
+      <label class="checkbox" data-sync-wrap${op ? ' hidden' : ''}><input type="checkbox" name="syncPrice" value="1"> Usar este precio como valor actual de la inversión</label>
       <div class="op-total" data-op-total></div>
       <p class="seg-note" data-op-hint></p>
     `,
     onMount(dialog) {
-      const typeSeg = dialog.querySelector('[data-seg="op-type"]');
-      const hiddenType = dialog.querySelector('input[name="type"]');
-      const select = dialog.querySelector('[data-op-investment]');
-      const hint = dialog.querySelector('[data-op-hint]');
-      const totalEl = dialog.querySelector('[data-op-total]');
+      const $ = (sel) => dialog.querySelector(sel);
+      const typeSeg = $('[data-seg="op-type"]');
+      const qtySeg = $('[data-seg="qty-mode"]');
+      const hiddenType = $('input[name="type"]');
+      const select = $('[data-op-investment]');
+      const hint = $('[data-op-hint]');
+      const totalEl = $('[data-op-total]');
+      const box = $('[data-mkt-box]');
+      const priceInput = $('input[name="price"]');
+      const dateInput = $('input[name="date"]');
+      const exec = $('input[name="execution"]');
       const val = (name) => payloadNumber(dialog.querySelector(`[name="${name}"]`)?.value);
+      const unitsNow = () => {
+        if (qtyMode !== 'amount') return val('units');
+        const price = val('price');
+        if (!(price > 0)) return 0;
+        const amount = val('amount');
+        return round(opType === 'buy' ? (amount - val('fees')) / price : (amount + val('fees')) / price, 8);
+      };
       const update = () => {
+        const isLinked = linked();
         const holding = currentHolding();
-        if (holding) hint.textContent = `Disponibles: ${unitsLabel(holding.units)} unidades · precio actual ${money(holding.currentPrice)} · coste medio ${money(holding.avg)}.`;
-        const gross = val('units') * val('price');
+        $('[data-exec-wrap]').hidden = !isLinked;
+        qtySeg.hidden = !isLinked;
+        $('[data-sync-wrap]').hidden = Boolean(op) || isLinked;
+        $('[data-units-field]').hidden = isLinked && qtyMode === 'amount';
+        $('[data-amount-field]').hidden = !(isLinked && qtyMode === 'amount');
+        $('[data-amount-label]').textContent = opType === 'buy' ? 'Importe invertido' : 'Importe recibido';
+        const marketPrice = isLinked && !exec.checked;
+        priceInput.readOnly = marketPrice;
+        priceInput.classList.toggle('is-locked', marketPrice);
+        $('[data-price-label]').textContent = marketPrice ? 'Precio de mercado' : isLinked ? 'Tu precio de ejecución' : 'Precio por unidad';
+        if (marketPrice && ctx) priceInput.value = String(round(ctx.close, ctx.close < 10 ? 6 : 4));
+        const units = unitsNow();
+        const price = val('price');
+        const gross = units * price;
         const total = opType === 'buy' ? gross + val('fees') : gross - val('fees');
-        const acc = dialog.querySelector('select[name="accountId"]').value;
+        const acc = $('select[name="accountId"]').value;
         totalEl.innerHTML = gross > 0
-          ? `<span>${opType === 'buy' ? 'Total a pagar' : 'Total a recibir'}</span><b>${esc(money(total))}</b>${acc ? `<small>${opType === 'buy' ? 'Se restará de' : 'Se sumará a'} ${esc(accountById(acc)?.name || '')}</small>` : ''}`
+          ? `<span>${opType === 'buy' ? 'Total a pagar' : 'Total a recibir'}</span><b>${esc(money(total))}</b><small>${qtyMode === 'amount' && isLinked ? `${esc(unitsLabel(units))} unidades · ` : ''}${acc ? `${opType === 'buy' ? 'Se restará de' : 'Se sumará a'} ${esc(accountById(acc)?.name || '')}` : ''}</small>`
           : '';
+        let msg = holding ? `Disponibles: ${unitsLabel(holding.units)} unidades · coste medio ${money(holding.avg)}.` : '';
+        if (isLinked && exec.checked && ctx && price > 0 && (price < ctx.low * 0.985 || price > ctx.high * 1.015)) {
+          msg = `Ese día ${inv().name} cotizó entre ${money(ctx.low)} y ${money(ctx.high)}. Revisa el precio o la fecha.`;
+          hint.classList.add('is-error');
+        } else hint.classList.remove('is-error');
+        hint.textContent = msg;
+      };
+      const loadMarket = async () => {
+        ctx = null;
+        if (!linked()) { box.hidden = true; update(); return; }
+        const date = dateInput.value || todayISO();
+        const mine = ++ctxSeq;
+        box.hidden = false;
+        box.innerHTML = `<p class="tiny mkt-status">${icon('refresh', 14)} Consultando el precio de ${esc(inv().name)} el ${esc(fmtDate(date))}…</p>`;
+        update();
+        try {
+          const { price } = await api('POST', 'api/market/price', { symbol: inv().quoteSymbol, date });
+          if (mine !== ctxSeq) return;
+          ctx = price;
+          box.innerHTML = marketBoxHTML(ctx, { type: opType, price: ctx.close }, inv());
+        } catch (err) {
+          if (mine !== ctxSeq) return;
+          const offlineMsg = /conect|conexión|respond/i.test(err.message || '');
+          box.innerHTML = `<p class="mkt-status mkt-status--error">${icon('alert', 15)} ${esc(err.message)}</p>${offlineMsg ? '<p class="tiny">Puedes escribir el precio que te dio tu bróker: quedará como «pendiente de comprobar» y se contrastará con el mercado en la próxima actualización.</p>' : ''}`;
+          if (offlineMsg) exec.checked = true;
+        }
+        update();
       };
       typeSeg.addEventListener('click', (event) => {
         const btn = event.target.closest('[data-op-type]');
@@ -2697,34 +2989,59 @@ function openOpModal(investmentId = null, op = null) {
         opType = btn.dataset.opType;
         hiddenType.value = opType;
         for (const b of typeSeg.querySelectorAll('[data-op-type]')) b.classList.toggle('active', b === btn);
+        if (ctx) box.innerHTML = marketBoxHTML(ctx, { type: opType, price: ctx.close }, inv());
         update();
       });
-      select?.addEventListener('change', () => { selectedId = select.value; update(); });
-      dialog.querySelector('.sheet-body').addEventListener('input', update);
-      dialog.querySelector('select[name="accountId"]').addEventListener('change', update);
-      update();
+      qtySeg.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-qty]');
+        if (!btn) return;
+        qtyMode = btn.dataset.qty;
+        for (const b of qtySeg.querySelectorAll('[data-qty]')) b.classList.toggle('active', b === btn);
+        update();
+      });
+      select?.addEventListener('change', () => { selectedId = select.value; loadMarket(); });
+      let dateTimer = null;
+      dateInput.addEventListener('change', () => { clearTimeout(dateTimer); dateTimer = setTimeout(loadMarket, 250); });
+      exec.addEventListener('change', update);
+      dialog.querySelector('.sheet-body').addEventListener('input', (event) => { if (event.target !== dateInput) update(); });
+      $('select[name="accountId"]').addEventListener('change', update);
+      loadMarket();
     },
     async onSubmit(formData) {
+      const investmentIdNow = fixed ? selectedId : formData.get('investmentId') || selectedId;
+      const isLinked = marketLinked(investmentById(investmentIdNow));
+      const exec = Boolean(formData.get('execution'));
+      const fees = payloadNumber(formData.get('fees'));
+      const price = payloadNumber(formData.get('price'));
+      const amountMode = isLinked && qtyMode === 'amount';
+      const amount = payloadNumber(formData.get('amount'));
+      let units = payloadNumber(formData.get('units'));
+      if (amountMode) {
+        if (!(amount > 0)) throw new Error('Indica el importe de la operación.');
+        units = price > 0 ? round(formData.get('type') === 'buy' ? (amount - fees) / price : (amount + fees) / price, 8) : 0;
+      }
       const payload = {
-        investmentId: selectedId,
+        investmentId: investmentIdNow,
         type: formData.get('type'),
-        units: payloadNumber(formData.get('units')),
-        price: payloadNumber(formData.get('price')),
-        fees: payloadNumber(formData.get('fees')),
+        units,
+        price,
+        fees,
         date: formData.get('date') || todayISO(),
         accountId: formData.get('accountId') || null,
-        note: String(formData.get('note') || '')
+        note: String(formData.get('note') || ''),
+        priceMode: isLinked ? (exec ? 'execution' : 'market') : 'manual'
       };
-      if (!fixed) payload.investmentId = formData.get('investmentId') || selectedId;
-      if (!(payload.units > 0)) throw new Error('Introduce al menos una unidad.');
-      if (payload.price < 0) throw new Error('El precio no puede ser negativo.');
+      if (amountMode) Object.assign(payload, { amountMode: true, amount });
+      if (payload.date > todayISO()) throw new Error('La fecha no puede ser futura.');
+      if (!(payload.units > 0)) throw new Error(amountMode ? 'El importe no alcanza para ninguna unidad.' : 'Introduce al menos una unidad.');
+      if (!isLinked && payload.price < 0) throw new Error('El precio no puede ser negativo.');
       if (op) await api('PATCH', `api/ops/${op.id}`, payload);
       else await api('POST', 'api/ops', payload);
-      if (formData.get('syncPrice')) {
+      if (!isLinked && formData.get('syncPrice')) {
         await api('PATCH', `api/investments/${payload.investmentId}`, { currentPrice: payload.price, priceUpdatedAt: payload.date });
       }
       render();
-      toast(op ? 'Operación actualizada' : payload.type === 'buy' ? 'Compra registrada' : 'Venta registrada');
+      toast(op ? 'Operación actualizada' : `${payload.type === 'buy' ? 'Compra' : 'Venta'} registrada${isLinked ? (exec ? ' con tu precio de ejecución' : ' con el precio de cierre de ese día') : ''}`);
     },
     async onDanger(dialog) {
       const ok = await confirmDialog({ title: 'Eliminar operación', message: 'Se recalcularán las unidades y el precio medio.', confirm: 'Eliminar' });
@@ -2758,19 +3075,41 @@ function openHistoryModal(investmentId) {
       ${rows.length ? `<div class="history-list">${rows.map((op) => {
         const buy = op.type === 'buy';
         const total = round(op.units * op.price + (buy ? 1 : -1) * (op.fees || 0));
-        return `<div class="history-row">
+        const linkedInv = marketLinked(holding);
+        const info = linkedInv ? entryContext(op) : null;
+        const since = buy && linkedInv && op.price > 0 && holding.currentPrice > 0 ? (holding.currentPrice / op.price - 1) * 100 : null;
+        const marketLine = info ? `<span class="op-context">
+            ${priceModeTag(op, holding)}
+            <span>Cierre de ese día ${esc(money(op.market.close))}${op.priceMode !== 'market' && Math.abs(info.dev) >= 0.05 ? ` · tu precio ${esc(pctLabel(info.dev, 1))}` : ''}</span>
+            ${info.verdict ? `<span class="mkt-verdict mkt-verdict--${info.tone}">${esc(info.verdict)}</span>` : ''}
+            ${since !== null ? `<span>Desde entonces ${changeChip(since)}</span>` : ''}
+            ${info.outOfRange ? `<span class="op-alert">${icon('alert', 13)} Este precio no es posible: ese día cotizó entre ${esc(money(op.market.low))} y ${esc(money(op.market.high))}. <button type="button" class="link-btn" data-fix-op="${esc(op.id)}">Usar el precio de mercado</button></span>` : ''}
+          </span>` : linkedInv && !op.market ? '<span class="op-context"><span class="tiny">Pendiente de comprobar con el mercado.</span></span>' : '';
+        return `<div class="history-row history-row--rich">
           <span class="tx-icon" style="width:32px;height:32px;border-radius:10px;background:${buy ? 'var(--accent-soft)' : 'var(--danger-soft)'};color:${buy ? 'var(--accent-2)' : 'var(--danger)'}">${icon(buy ? 'arrowDown' : 'arrowUp', 15)}</span>
           <span class="tx-main">
             <span class="tx-title">${buy ? 'Compra' : 'Venta'} · ${esc(unitsLabel(op.units))} u.</span>
             <span class="tx-meta">${esc(dateLabel(op.date))} · ${esc(money(op.price))}/u.${op.fees ? ' · comisión ' + esc(money(op.fees)) : ''}${op.note ? ' · ' + esc(op.note) : ''}</span>
+            ${marketLine}
           </span>
           <span class="side"><b>${esc(money(total))}</b>${op.accountId ? `<small>${esc(accountById(op.accountId)?.name || '')}</small>` : ''}</span>
           <span class="row-actions"><button type="button" class="icon-btn" data-edit-op="${esc(op.id)}" aria-label="Editar operación">${icon('edit', 16)}</button><button type="button" class="icon-btn danger" data-del-op="${esc(op.id)}" aria-label="Eliminar operación">${icon('trash', 16)}</button></span>
         </div>`;
-      }).join('')}</div>` : `<div class="empty"><span class="empty-icon">📋</span><h3>Sin operaciones</h3><p>Añade una compra para empezar a calcular tu posición.</p></div>`}
+      }).join('')}</div>` : `<div class="empty"><span class="empty-icon">${icon('list', 24)}</span><h3>Sin operaciones</h3><p>Añade una compra para empezar a calcular tu posición.</p></div>`}
     `,
     onMount(dialog, form, close) {
       form.querySelector('.sheet-body').addEventListener('click', async (event) => {
+        const fixBtn = event.target.closest('[data-fix-op]');
+        if (fixBtn) {
+          try {
+            await api('PATCH', `api/ops/${fixBtn.dataset.fixOp}`, { priceMode: 'market' });
+            close();
+            render();
+            toast('Precio corregido con el cierre de ese día');
+            openHistoryModal(investmentId);
+          } catch (err) { toast(err.message, 'error'); }
+          return;
+        }
         const editBtn = event.target.closest('[data-edit-op]');
         if (editBtn) {
           const op = byId(store.data.ops, editBtn.dataset.editOp);
@@ -2975,6 +3314,7 @@ async function loadDemoData() {
   ui.filters = { q: '', type: 'all', category: '', account: '', month: '' };
   render();
   toast('Datos de ejemplo cargados');
+  refreshPricesNow({ silent: true }).catch(() => {});
 }
 
 async function resetData() {
@@ -2992,6 +3332,17 @@ async function resetData() {
 }
 
 /* ---------------------------------------------------------------- acciones */
+document.addEventListener('submit', async (event) => {
+  const form = event.target.closest?.('[data-proxy-form]');
+  if (!form) return;
+  event.preventDefault();
+  try {
+    const data = await api('PATCH', 'api/settings', { marketProxy: form.querySelector('[name="marketProxy"]').value.trim() });
+    if (data?.settings) store.data.settings = data.settings;
+    toast('Intermediario guardado. Prueba con Actualizar.');
+  } catch (err) { toast(err.message, 'error'); }
+});
+
 document.addEventListener('click', async (event) => {
   const el = event.target.closest('[data-action]');
   if (!el) return;
@@ -3085,7 +3436,10 @@ document.addEventListener('click', async (event) => {
         break;
       case 'update-price': {
         const investment = investmentById(el.dataset.id);
-        if (investment) openPriceModal(investment);
+        if (investment && marketLinked(investment)) {
+          el.disabled = true;
+          try { await refreshPricesNow({ ids: [investment.id] }); } finally { el.disabled = false; }
+        } else if (investment) openPriceModal(investment);
         break;
       }
       case 'pin':
@@ -3234,11 +3588,11 @@ document.addEventListener('change', async (event) => {
 
 /* ---------------------------------------------------------------- préstamos: cálculos */
 const LOAN_TYPES = {
-  mortgage: { label: 'Hipoteca', icon: '🏠', category: 'Vivienda' },
-  personal: { label: 'Préstamo personal', icon: '💳', category: 'Otros gastos' },
-  car: { label: 'Coche', icon: '🚗', category: 'Transporte' },
-  student: { label: 'Estudios', icon: '🎓', category: 'Educación' },
-  other: { label: 'Otro', icon: '📄', category: 'Otros gastos' }
+  mortgage: { label: 'Hipoteca', icon: 'home', category: 'Vivienda' },
+  personal: { label: 'Préstamo personal', icon: 'card', category: 'Otros gastos' },
+  car: { label: 'Coche', icon: 'car', category: 'Transporte' },
+  student: { label: 'Estudios', icon: 'graduation', category: 'Educación' },
+  other: { label: 'Otro', icon: 'file', category: 'Otros gastos' }
 };
 function loanPayment(balance, monthlyRate, months) {
   if (months <= 0) return balance;
@@ -3332,7 +3686,7 @@ function loanCard(loan) {
   const pct = clamp(st.pct, 0, 1);
   return `<article class="card goal loan" style="--c:${tone(loan.color || '#64748b')}">
     <div class="goal-head">
-      <span class="goal-icon" style="background:var(--surface-2)">${esc(meta.icon)}</span>
+      <span class="goal-icon" style="background:var(--surface-2)">${glyphSVG(meta.icon, 22)}</span>
       <div class="goal-title"><h3>${esc(loan.name)}</h3><span>${esc(meta.label)} · TIN ${esc(String(loan.annualRate).replace('.', ','))} %</span></div>
       <button class="icon-btn" type="button" data-action="edit-loan" data-id="${esc(loan.id)}" aria-label="Editar ${esc(loan.name)}">${icon('edit', 17)}</button>
     </div>
@@ -3373,7 +3727,7 @@ function viewPrestamos() {
   </div>
   <div class="goal-grid">${states.map((x) => loanCard(x.loan)).join('')}</div>
   <p class="tiny" style="text-align:center">Cálculo con el sistema francés (cuota constante), el habitual en España. Si tu banco usa otro redondeo puede haber diferencias de céntimos.</p>` : `<section class="card"><div class="empty">
-    <span class="empty-icon">🏦</span>
+    <span class="empty-icon">${icon('bank', 24)}</span>
     <h3>Sin préstamos ni hipotecas</h3>
     <p>Añade tu hipoteca o un préstamo para ver el capital pendiente, los intereses que te quedan y cuánto ahorras si amortizas antes.</p>
     <button class="btn btn-primary btn-sm" type="button" data-action="new-loan">${icon('plus', 14)} Añadir préstamo</button>
@@ -3383,7 +3737,7 @@ function viewPrestamos() {
 /* ---------------------------------------------------------------- modal: préstamo */
 function expenseCategoryOptions(selected) {
   return store.data.categories.filter((c) => c.kind === 'expense')
-    .map((c) => `<option value="${esc(c.id)}"${c.id === selected ? ' selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('');
+    .map((c) => `<option value="${esc(c.id)}"${c.id === selected ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
 }
 function accountOptions(selected, allowEmpty = false) {
   return (allowEmpty ? '<option value="">Sin cuenta</option>' : '') + store.data.accounts
@@ -3430,7 +3784,7 @@ function openLoanModal(loan = null) {
       <div class="form-grid">
         <div class="field"><span>Nombre</span><input name="name" maxlength="60" placeholder="Ej. Hipoteca piso" value="${esc(loan?.name || '')}" required></div>
         <div class="field"><span>Tipo</span><select name="type">
-          ${Object.entries(LOAN_TYPES).map(([value, meta]) => `<option value="${value}"${type === value ? ' selected' : ''}>${esc(meta.icon)} ${esc(meta.label)}</option>`).join('')}
+          ${Object.entries(LOAN_TYPES).map(([value, meta]) => `<option value="${value}"${type === value ? ' selected' : ''}>${esc(meta.label)}</option>`).join('')}
         </select></div>
       </div>
       <div class="form-grid">
@@ -3747,7 +4101,7 @@ async function openBackupsModal() {
         <span class="tx-icon">${icon(b.kind === 'daily' ? 'calendar' : b.kind === 'manual' ? 'download' : 'shield', 17)}</span>
         <span class="tx-main"><span class="tx-title">${esc(backupLabel(b))}</span><span class="tx-meta">${esc(when(b.at))} · ${b.counts ? `${b.counts.transactions} movimientos · ${b.counts.accounts} cuentas` : 'sin detalles'}</span></span>
         <button class="btn btn-ghost btn-sm" type="button" data-restore="${esc(b.name)}">Restaurar</button>
-      </div>`).join('')}</div>` : '<div class="empty"><span class="empty-icon">🗂️</span><h3>Aún no hay copias</h3><p>Se crean solas al guardar cambios.</p></div>',
+      </div>`).join('')}</div>` : '<div class="empty"><span class="empty-icon">' + glyphSVG('file', 24) + '</span><h3>Aún no hay copias</h3><p>Se crean solas al guardar cambios.</p></div>',
     onMount(dialog) {
       dialog.querySelectorAll('[data-restore]').forEach((btn) => btn.addEventListener('click', async () => {
         const ok = await confirmDialog({ title: 'Restaurar copia', message: 'Tus datos actuales se sustituirán por los de esta copia. Antes se guarda una copia de seguridad de lo que tienes ahora.', confirm: 'Restaurar', danger: false });
@@ -3808,23 +4162,20 @@ async function openPhoneModal() {
         <li>Si no carga, comprueba que el móvil no usa datos móviles ni una Wi-Fi de invitados.</li>
         ${info.platform === 'win32' ? '<li>Si sigue sin cargar, haz doble clic en <b>permitir-movil.bat</b> (en la carpeta de la app) y acepta el permiso de administrador. Abre el puerto solo en redes privadas.</li><li>En Windows, la Wi-Fi debe estar marcada como <b>red privada</b>: Configuración → Red e Internet → Wi-Fi → tu red → Perfil de red: Privada.</li>' : '<li>Si tienes cortafuegos, permite conexiones entrantes al puerto ' + esc(info.port) + '.</li>'}
         <li>En el iPhone: Compartir → <b>Añadir a pantalla de inicio</b>.</li>
-      </ol>` : '<div class="empty"><span class="empty-icon">📶</span><h3>Sin red local</h3><p>Este ordenador no está conectado a ninguna Wi-Fi o red. Conéctalo y vuelve a abrir esta ventana.</p></div>'
+      </ol>` : '<div class="empty"><span class="empty-icon">' + glyphSVG('wifi', 24) + '</span><h3>Sin red local</h3><p>Este ordenador no está conectado a ninguna Wi-Fi o red. Conéctalo y vuelve a abrir esta ventana.</p></div>'
   });
 }
 
 /* ---------------------------------------------------------------- cotizaciones */
-function quotable(inv) {
-  if (WEB) return inv.type === 'crypto' && Boolean(inv.quoteSymbol || inv.symbol);
-  return Boolean(inv.quoteSymbol || (inv.symbol && ['stock', 'etf', 'crypto'].includes(inv.type)));
-}
-async function refreshPricesNow({ silent = false } = {}) {
-  const list = (store.data.investments || []).filter(quotable);
+function quotable(inv) { return marketLinked(inv); }
+async function refreshPricesNow({ silent = false, ids = null } = {}) {
+  const list = (store.data.investments || []).filter((i) => quotable(i) && (!ids || ids.includes(i.id)));
   if (!list.length) {
-    if (!silent) toast(WEB ? 'En la versión web solo se actualizan criptomonedas con símbolo (BTC, ETH…).' : 'Añade el símbolo de cotización a tus inversiones (por ejemplo IWDA.AS o AAPL).', 'error');
+    if (!silent) toast('Ninguna inversión está vinculada al mercado. Edítala y búscala por nombre, ticker o ISIN.', 'error');
     return;
   }
-  if (!silent) toast('Consultando cotizaciones…');
-  const result = await api('POST', 'api/prices/refresh', {});
+  if (!silent) toast('Consultando el mercado…');
+  const result = await api('POST', 'api/prices/refresh', ids ? { ids } : {});
   const ok = (result.results || []).filter((r) => r.ok);
   const failed = (result.results || []).filter((r) => !r.ok);
   render();
@@ -3833,14 +4184,17 @@ async function refreshPricesNow({ silent = false } = {}) {
       const names = failed.slice(0, 3).map((f) => f.name).join(', ') + (failed.length > 3 ? '…' : '');
       toast(`${ok.length} de ${ok.length + failed.length} actualizadas. Sin precio: ${names}. ${failed[0].error}`, ok.length ? 'success' : 'error');
     }
-    else toast(`${ok.length} ${ok.length === 1 ? 'cotización actualizada' : 'cotizaciones actualizadas'}`);
+    else toast(ok.length === 1 ? 'Precio actualizado con el mercado' : `${ok.length} precios actualizados con el mercado`);
   }
 }
+/** Mantiene los precios al día mientras la app está abierta (cada 15 minutos como mucho). */
 async function maybeAutoRefreshPrices() {
   const s = store.data?.settings;
-  if (!s?.autoPrices || store.offline) return;
-  if (String(s.pricesRefreshedAt || '').slice(0, 10) === todayISO()) return;
-  try { await refreshPricesNow({ silent: true }); } catch { /* sin conexión: se reintenta otro día */ }
+  if (!s?.autoPrices || store.offline || document.hidden) return;
+  if (!(store.data.investments || []).some(quotable)) return;
+  const last = Date.parse(s.pricesRefreshedAt || '') || 0;
+  if (Date.now() - last < 15 * 60 * 1000) return;
+  try { await refreshPricesNow({ silent: true }); } catch { /* sin conexión: se reintenta más tarde */ }
 }
 
 /* ---------------------------------------------------------------- actualizaciones de la app */
@@ -4116,6 +4470,7 @@ async function obFinish(demo) {
   location.hash = '#/resumen';
   render();
   toast(demo ? 'Datos de ejemplo cargados. Bórralos en Ajustes cuando quieras.' : 'Todo listo. Sigue los primeros pasos.');
+  if (demo) refreshPricesNow({ silent: true }).catch(() => {});
 }
 
 /* ---------------------------------------------------------------- primeros pasos y resumen */
@@ -4184,7 +4539,7 @@ function recentInvoicesCard() {
         <span class="tx-amt income">${esc(money(inv.total ?? invTotals(inv).total))}</span>
       </button>`;
     }).join('')}</div>`
-      : `<div class="empty"><span class="empty-icon">🧾</span><h3>Sin facturas</h3><p>Crea tu primera factura: el IVA y la retención se calculan solos.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-invoice">Nueva factura</button></div>`}
+      : `<div class="empty"><span class="empty-icon">${icon('receipt', 24)}</span><h3>Sin facturas</h3><p>Crea tu primera factura: el IVA y la retención se calculan solos.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-invoice">Nueva factura</button></div>`}
   </section>`;
 }
 
@@ -4237,7 +4592,7 @@ function viewFacturas() {
           <td class="hide-m"><span class="badge ${st.cls}">${st.label}</span></td>
         </tr>`;
       }).join('')}</tbody></table></div>`
-      : `<div class="empty"><span class="empty-icon">🧾</span><h3>${all.length ? 'Nada en este filtro' : 'Aún no has hecho facturas'}</h3><p>Crea un cliente y tu primera factura: Mi Cartera aplica el IVA, la retención y la numeración por ti.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-invoice">Nueva factura</button></div>`}
+      : `<div class="empty"><span class="empty-icon">${icon('receipt', 24)}</span><h3>${all.length ? 'Nada en este filtro' : 'Aún no has hecho facturas'}</h3><p>Crea un cliente y tu primera factura: Mi Cartera aplica el IVA, la retención y la numeración por ti.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-invoice">Nueva factura</button></div>`}
   </section>
   <p class="tiny legal-note">Las facturas cumplen el contenido del Reglamento de facturación (RD 1619/2012). Mi Cartera no es todavía un sistema certificado Verifactu: consulta la sección Impuestos.</p>`;
 }
@@ -4522,7 +4877,7 @@ function viewClientes() {
           <td>${esc(money(sum(mine.filter((i) => i.status === 'issued'), (i) => i.total)))}</td>
         </tr>`;
       }).join('')}</tbody></table></div>`
-      : `<div class="empty"><span class="empty-icon">👥</span><h3>Sin clientes todavía</h3><p>Añade a quién facturas. Si es empresa o autónomo, necesitas su NIF.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-client">Nuevo cliente</button></div>`}
+      : `<div class="empty"><span class="empty-icon">${icon('users', 24)}</span><h3>Sin clientes todavía</h3><p>Añade a quién facturas. Si es empresa o autónomo, necesitas su NIF.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-client">Nuevo cliente</button></div>`}
   </section>`;
 }
 function openClientModal(client = null, onSaved = null) {
@@ -4611,7 +4966,7 @@ function viewGastos() {
         <td class="hide-m">${esc(fmtDate(p.date))}</td><td class="cell-text"><b>${esc(p.supplier)}</b>${p.concept ? `<br><span class="muted">${esc(p.concept)}</span>` : ''}<span class="cell-sub show-m">${esc(fmtDate(p.date))}</span></td>
         <td class="cell-text hide-m">${esc(PURCHASE_KIND_INFO[p.kind]?.label || p.kind)}${tot[i].pct < 100 ? ` · ${tot[i].pct} %` : ''}</td>
         <td class="hide-m">${esc(money(tot[i].base))}</td><td>${esc(money(tot[i].ivaDeducible))}</td><td><b>${esc(money(tot[i].total))}</b></td></tr>`).join('')}</tbody></table></div>`
-      : `<div class="empty"><span class="empty-icon">🧾</span><h3>Sin gastos en este periodo</h3><p>Apunta las facturas de proveedores, tu cuota de autónomos, la gestoría o el móvil: todo lo que sea deducible.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-purchase">Nuevo gasto</button></div>`}
+      : `<div class="empty"><span class="empty-icon">${icon('receipt', 24)}</span><h3>Sin gastos en este periodo</h3><p>Apunta las facturas de proveedores, tu cuota de autónomos, la gestoría o el móvil: todo lo que sea deducible.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-purchase">Nuevo gasto</button></div>`}
   </section>
   <p class="tiny legal-note">Para que un gasto sea deducible debe estar vinculado a la actividad, justificado con factura a tu nombre y registrado. Ante la duda, pregunta a tu asesor.</p>`;
 }
