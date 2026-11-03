@@ -1,7 +1,7 @@
 {
-  "name": "Mi Cartera · Gestión patrimonial privada",
+  "name": "Mi Cartera · Gestoría privada para autónomos",
   "short_name": "Mi Cartera",
-  "description": "Ingresos, gastos e inversiones. 100% local, sin nube.",
+  "description": "Facturas, IVA, IRPF, cuota de autónomos y finanzas personales. 100% local, sin nube.",
   "lang": "es",
   "start_url": "./",
   "scope": "./",

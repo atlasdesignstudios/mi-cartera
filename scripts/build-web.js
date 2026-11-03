@@ -21,6 +21,11 @@ function slice(startMarker, endMarker) {
 // Lógica de dominio: constantes, validación, recurrentes, demo e importación.
 const core = slice("const VERSION = ", '// ---------------------------------------------------------------- HTTP')
   .replace("fs.mkdirSync(BACKUP_DIR, { recursive: true });", '');
+// Motor fiscal (public/fiscal.js) dentro de su propio ámbito para no chocar con los nombres del servidor.
+const fiscalSrc = fs.readFileSync(path.join(PUBLIC_DIR, 'fiscal.js'), 'utf8');
+const fiscalExports = [...fiscalSrc.matchAll(/^export (?:const|function) ([A-Za-z0-9_]+)/gm)].map((m) => m[1]);
+const fiscal = 'const { invoiceTotals, purchaseTotals, validateNif, IVA_RATES, TAX_MODES } = (function () {\n'
+  + fiscalSrc.replace(/^export /gm, '') + '\nreturn { ' + fiscalExports.join(', ') + ' };\n})();\n';
 // Router de la API.
 const router = slice('function collectionById(', 'const server = http.createServer(');
 
@@ -67,9 +72,17 @@ function loadDb() {
     ...base, ...parsed, settings,
     accounts: list('accounts', base.accounts), categories: list('categories', base.categories),
     transactions: list('transactions'), investments: list('investments'), ops: list('ops'),
-    recurring: list('recurring'), goals: list('goals'), loans: list('loans'), deleted: list('deleted'),
+    recurring: list('recurring'), goals: list('goals'), loans: list('loans'),
+    clients: list('clients'), invoices: list('invoices'), purchases: list('purchases'), deleted: list('deleted'),
     rev: Number(parsed.rev) || 0
   };
+}
+function loadDbUpgraded() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch { raw = null; }
+  const state = loadDb();
+  upgradeSettings(state, (raw && raw.settings) || {});
+  return state;
 }
 // Copias automáticas dentro del navegador: una diaria (5 días) y las de seguridad (5).
 const BK_KEY = 'micartera.web.backups.v1';
@@ -197,11 +210,9 @@ async function readJson(req) {
 }
 
 // ------------------------------------------------ arranque
-if (firstVisit) {
-  db = demoState();
-  try { runRecurring(); } catch { /* sin recurrentes */ }
-  commit();
-}
+// Primera visita: la app empieza vacía y la bienvenida ofrece cargar datos de ejemplo.
+db = loadDbUpgraded();
+if (firstVisit) commit();
 try { runRecurringAndSave(); } catch { /* reintenta luego */ }
 setInterval(() => { try { runRecurringAndSave(); } catch { /* reintenta luego */ } }, 60 * 60 * 1000);
 
@@ -251,7 +262,7 @@ globalThis.fetch = async function (input, init = {}) {
 
 fs.rmSync(DIST, { recursive: true, force: true });
 fs.cpSync(PUBLIC_DIR, DIST, { recursive: true });
-fs.writeFileSync(path.join(DIST, 'local-api.js'), shim + core + '\n' + router + overrides, 'utf8');
+fs.writeFileSync(path.join(DIST, 'local-api.js'), shim + fiscal + core + '\n' + router + overrides, 'utf8');
 
 const indexPath = path.join(DIST, 'index.html');
 const html = fs.readFileSync(indexPath, 'utf8');
