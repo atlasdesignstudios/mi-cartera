@@ -1,8 +1,9 @@
 /* Mi Cartera — aplicación (sin dependencias) */
 'use strict';
+import * as F from './fiscal.js';
 
 const STORAGE_KEY = 'micartera.state.v1';
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 // En la versión web (GitHub Pages) no hay servidor: los datos viven en este navegador.
 const WEB = Boolean(globalThis.MC_WEB);
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'MXN', 'ARS', 'COP', 'CLP', 'PEN', 'BRL', 'UYU', 'JPY'];
@@ -58,17 +59,24 @@ const NAV = [
   { id: 'inversiones', label: 'Inversiones', icon: 'trend' },
   { id: 'prestamos', label: 'Préstamos', icon: 'bank' },
   { id: 'cuentas', label: 'Cuentas', icon: 'wallet' },
+  { id: 'facturas', label: 'Facturas', icon: 'invoice' },
+  { id: 'clientes', label: 'Clientes', icon: 'users' },
+  { id: 'gastos', label: 'Gastos del negocio', icon: 'receipt' },
+  { id: 'impuestos', label: 'Impuestos', icon: 'percent' },
+  { id: 'cuota', label: 'Cuota de autónomos', icon: 'shield' },
   { id: 'informes', label: 'Informes', icon: 'chart' },
   { id: 'ajustes', label: 'Ajustes', icon: 'settings' }
 ];
 const MORE_NAV = { id: 'mas', label: 'Más', icon: 'grid' };
 const ROUTES = [...NAV.map((n) => n.id), 'mas'];
-const BOTTOM_NAV = ['resumen', 'movimientos', 'inversiones', 'informes', 'mas'];
-const MORE_VIEWS = ['mas', 'cuentas', 'presupuestos', 'recurrentes', 'objetivos', 'prestamos', 'ajustes'];
 const FREQ_LABELS = { weekly: 'Semanal', monthly: 'Mensual', quarterly: 'Trimestral', yearly: 'Anual' };
 const FREQ_PER_MONTH = { weekly: 52 / 12, monthly: 1, quarterly: 1 / 3, yearly: 1 / 12 };
 
 const ICONS = {
+  invoice: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 12h7M9 16h5"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  percent: '<path d="M19 5 5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/>',
   home: '<path d="M3 10.2 12 3l9 7.2"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
   trend: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
@@ -472,8 +480,8 @@ function navHTML(items, bottom = false) {
 function initChrome() {
   const side = document.getElementById('sideNav');
   const bottom = document.getElementById('bottomNav');
-  if (side) side.innerHTML = navHTML(NAV.map((n) => n.id));
-  if (bottom) bottom.innerHTML = navHTML(BOTTOM_NAV, true);
+  if (side && store.data) renderNav();
+  else if (bottom) bottom.innerHTML = '';
   const chip = document.getElementById('todayChip');
   if (chip) chip.innerHTML = `${icon('calendar', 16)}<span>${esc(todayLong())}</span>`;
   applyTheme();
@@ -486,7 +494,7 @@ function updateNav(view) {
   for (const link of $$('[data-nav]')) {
     const id = link.dataset.nav;
     const isBottom = Boolean(link.closest('.bottomnav'));
-    const active = id === view || (isBottom && id === 'mas' && MORE_VIEWS.includes(view));
+    const active = id === view || (isBottom && id === 'mas' && moreViews().includes(view) && !bottomNavItems().includes(view));
     link.classList.toggle('active', active);
     if (active) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
@@ -495,10 +503,19 @@ function updateNav(view) {
 function render() {
   if (!store.data) return;
   applyTheme();
-  const view = readRoute();
-  store.view = view;
-  updateNav(view);
   const host = document.getElementById('view');
+  const onboarding = !store.data.settings?.onboarded && !store.offline;
+  document.body.classList.toggle('is-onboarding', onboarding);
+  if (onboarding) {
+    store.view = 'bienvenida';
+    host.innerHTML = viewOnboarding();
+    return;
+  }
+  let view = readRoute();
+  if (!viewEnabled(view)) view = 'resumen';
+  store.view = view;
+  renderNav();
+  updateNav(view);
   host.innerHTML = VIEWS[view] ? VIEWS[view]() : '';
   if (view === 'movimientos') renderTxList();
   updateIsland();
@@ -824,6 +841,12 @@ function budgetMiniRow(row) {
 }
 
 /* ---------------------------------------------------------------- vista: resumen */
+function pairCards(cards) {
+  const list = cards.filter(Boolean);
+  let out = '';
+  for (let i = 0; i < list.length; i += 2) out += `<div class="grid-2">${list[i]}${list[i + 1] || ''}</div>`;
+  return out;
+}
 function viewResumen() {
   const now = monthKey(todayISO());
   const stats = monthStats(now);
@@ -857,7 +880,7 @@ function viewResumen() {
       </div>
       <div class="hero-actions">
         <button class="btn btn-light" type="button" data-action="new-tx" data-type="expense">${icon('plus', 16)} Añadir movimiento</button>
-        <a class="btn btn-outline-light" href="#/inversiones">Ver cartera ${icon('arrowRight', 16)}</a>
+        ${hasBusiness() ? `<button class="btn btn-outline-light" type="button" data-action="new-invoice">${icon('invoice', 16)} Nueva factura</button>` : moduleOn('investments') ? `<a class="btn btn-outline-light" href="#/inversiones">Ver cartera ${icon('arrowRight', 16)}</a>` : ''}
       </div>
     </div>
     <div class="hero-visual">
@@ -867,6 +890,8 @@ function viewResumen() {
     </div>
   </section>
 
+  ${firstStepsCard()}
+  ${businessSummaryHTML()}
   <div class="statgrid">
     ${statCard('Ingresos del mes', bigMoney(stats.income), `${deltaBadge(stats.income, prev.income)} <span>vs. mes anterior</span>`, 'income', 'arrowUp')}
     ${statCard('Gastos del mes', bigMoney(stats.expense), `${deltaBadge(stats.expense, prev.expense, true)} <span>vs. mes anterior</span>`, 'expense', 'wallet')}
@@ -890,8 +915,9 @@ function viewResumen() {
     </section>
   </div>
 
-  <div class="grid-2">
-    <section class="card">
+  ${pairCards([
+    hasBusiness() ? recentInvoicesCard() : '',
+    true ? `    <section class="card">
       <div class="card-head">
         <div><h2>Últimos movimientos</h2><p>Lo que ha entrado y salido</p></div>
         <a class="card-link" href="#/movimientos">Ver todos ${icon('arrowRight', 14)}</a>
@@ -899,8 +925,8 @@ function viewResumen() {
       ${recent.length
         ? `<div class="txlist compact">${recent.map(txRow).join('')}</div>`
         : `<div class="empty"><span class="empty-icon">🧾</span><h3>Aún no hay movimientos</h3><p>Registra tu primer ingreso o gasto para empezar.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-tx">Añadir movimiento</button></div>`}
-    </section>
-    <section class="card">
+    </section>` : '',
+    moduleOn('budgets') ? `    <section class="card">
       <div class="card-head">
         <div><h2>Presupuestos</h2><p>${esc(monthLabel(now))}</p></div>
         <a class="card-link" href="#/presupuestos">Gestionar ${icon('arrowRight', 14)}</a>
@@ -908,11 +934,8 @@ function viewResumen() {
       ${budgets.length
         ? budgets.map(budgetMiniRow).join('')
         : `<div class="empty"><span class="empty-icon">🎯</span><h3>Ponte un límite mensual</h3><p>Define cuánto quieres gastar en cada categoría y sigue tu progreso.</p><button class="btn btn-soft btn-sm" type="button" data-action="edit-budgets">Crear presupuesto</button></div>`}
-    </section>
-  </div>
-
-  <div class="grid-2">
-    <section class="card">
+    </section>` : '',
+    moduleOn('recurring') ? `    <section class="card">
       <div class="card-head">
         <div><h2>Próximos cobros y pagos</h2><p>Recurrentes de los próximos 30 días</p></div>
         <a class="card-link" href="#/recurrentes">Gestionar ${icon('arrowRight', 14)}</a>
@@ -921,8 +944,8 @@ function viewResumen() {
         ? `<div class="txlist compact">${upcoming.slice(0, 5).map((u) => ruleRow(u.rule, u.date, true)).join('')}</div>
            <div class="upcoming-foot"><span>Previsto en 30 días</span><b class="${upcomingNet < 0 ? 'neg' : 'pos'}">${upcomingNet >= 0 ? '+' : '−'}${esc(money(Math.abs(upcomingNet)))}</b></div>`
         : `<div class="empty"><span class="empty-icon">🔁</span><h3>Sin recurrentes</h3><p>Programa tu nómina, el alquiler o las suscripciones y se apuntarán solos.</p><button class="btn btn-soft btn-sm" type="button" data-action="new-recurring">Crear recurrente</button></div>`}
-    </section>
-    <section class="card">
+    </section>` : '',
+    moduleOn('goals') ? `    <section class="card">
       <div class="card-head">
         <div><h2>Objetivos de ahorro</h2><p>Lo que estás construyendo</p></div>
         <a class="card-link" href="#/objetivos">Ver todos ${icon('arrowRight', 14)}</a>
@@ -937,8 +960,8 @@ function viewResumen() {
             <span class="budget-amount"><b>${esc(percent(g.pct, 0))}</b>${g.reached ? 'conseguido' : g.perMonth ? esc(money(g.perMonth, { decimals: 0 })) + '/mes' : 'progreso'}</span>
           </button>`).join('')
         : `<div class="empty"><span class="empty-icon">🏁</span><h3>Define un objetivo</h3><p>Fondo de emergencia, viaje, coche… y sigue cuánto te falta.</p><button class="btn btn-soft btn-sm" type="button" data-action="new-goal">Crear objetivo</button></div>`}
-    </section>
-  </div>`;
+    </section>` : ''
+  ])}`;
 }
 
 /* ---------------------------------------------------------------- vista: movimientos */
@@ -1711,11 +1734,23 @@ function viewMas() {
     { id: 'objetivos', icon: 'flag', title: 'Objetivos', text: goals.length ? `${goals.length} objetivos · ${goals.filter((g) => g.reached).length} conseguidos` : 'Ahorra con propósito' },
     { id: 'prestamos', icon: 'bank', title: 'Préstamos', text: (store.data.loans || []).length ? `${(store.data.loans || []).length} · ${money(totalDebt(), { decimals: 0 })} pendientes` : 'Hipotecas y préstamos' },
     { id: 'informes', icon: 'chart', title: 'Informes', text: 'Tu año en números' },
-    { id: 'ajustes', icon: 'settings', title: 'Ajustes', text: 'Tema, PIN, copias y categorías' }
+    { id: 'ajustes', icon: 'settings', title: 'Ajustes', text: 'Perfil, secciones, negocio, PIN y copias' }
   ];
+  const d = store.data;
+  const pendingInv = (d.invoices || []).filter((i) => i.status === 'issued').length;
+  const next = hasBusiness() ? F.upcomingDeadlines(todayISO(), { count: 1 })[0] : null;
+  items.unshift(
+    { id: 'facturas', icon: 'invoice', title: 'Facturas', text: pendingInv ? `${pendingInv} pendientes de cobro` : `${(d.invoices || []).length} facturas` },
+    { id: 'clientes', icon: 'users', title: 'Clientes', text: `${(d.clients || []).length} clientes` },
+    { id: 'gastos', icon: 'receipt', title: 'Gastos del negocio', text: 'Facturas recibidas y deducibles' },
+    { id: 'impuestos', icon: 'percent', title: 'Impuestos', text: next ? `${next.title.split(':')[0]} · hasta ${fmtDate(next.to)}` : 'Modelos 303 y 130' },
+    { id: 'cuota', icon: 'shield', title: 'Cuota de autónomos', text: 'Tramo, tarifa plana y regularización' }
+  );
+  const bottom = bottomNavItems();
+  const visible = items.filter((it) => viewEnabled(it.id) && !bottom.includes(it.id));
   return `
   <div class="viewhead"><div><h1>Más</h1><p>Todas las secciones de Mi Cartera.</p></div></div>
-  <div class="more-grid">${items.map((it) => `<a class="card more-item" href="#/${it.id}">
+  <div class="more-grid">${visible.map((it) => `<a class="card more-item" href="#/${it.id}">
     <span class="more-icon">${icon(it.icon, 20)}</span>
     <span class="more-text"><b>${esc(it.title)}</b><span>${esc(it.text)}</span></span>
     <span class="more-arrow">${icon('chevronRight', 18)}</span>
@@ -1752,6 +1787,7 @@ function viewAjustes() {
   </div>
 
   <div class="settings-grid">
+    ${settingsProfileHTML()}
     <section class="card setting-card">
       <h2>Apariencia y moneda</h2>
       <p>Así se ve Mi Cartera en este dispositivo.</p>
@@ -1862,7 +1898,7 @@ function viewAjustes() {
       <h2>Zona de pruebas y reinicio</h2>
       <p>Útil para explorar la app antes de meter tus datos reales.</p>
       <div class="setting-row">
-        <div><h3>Cargar datos de ejemplo</h3><p>Reemplaza todo con 6 meses de movimientos, recurrentes, objetivos e inversiones ficticias.</p></div>
+        <div><h3>Cargar datos de ejemplo</h3><p>${hasBusiness() ? 'Reemplaza todo con clientes, facturas y gastos de un autónomo ficticio, además de movimientos personales.' : 'Reemplaza todo con 6 meses de movimientos, recurrentes, objetivos e inversiones ficticias.'}</p></div>
         <button class="btn btn-soft btn-sm" type="button" data-action="demo">${icon('sparkles', 14)} Cargar demo</button>
       </div>
       <div class="setting-row">
@@ -3136,6 +3172,7 @@ document.addEventListener('click', async (event) => {
         render();
         break;
       default:
+        await handleBizAction(action, el);
         break;
     }
   } catch (err) {
@@ -3837,6 +3874,1217 @@ function setupServiceWorker() {
     .catch(() => {});
 }
 
+/* ================================================================ negocio: autónomos en España (v1.4) */
+const PROFILE_LABELS = {
+  personal: { title: 'Particular', text: 'Controlar mis gastos, ahorro e inversiones.', icon: 'home' },
+  autonomo: { title: 'Autónomo', text: 'Facturar con IVA e IRPF, preparar mis impuestos y calcular mi cuota.', icon: 'invoice' },
+  ambos: { title: 'Las dos cosas', text: 'Soy autónomo y además quiero llevar mis finanzas personales.', icon: 'grid' }
+};
+const MODULE_INFO = {
+  business: { title: 'Facturación e impuestos', text: 'Facturas, clientes, gastos deducibles, modelos 303 y 130 y cuota de autónomos.' },
+  budgets: { title: 'Presupuestos', text: 'Límites de gasto mensuales por categoría.' },
+  recurring: { title: 'Recurrentes', text: 'Nómina, alquiler y recibos que se apuntan solos.' },
+  goals: { title: 'Objetivos de ahorro', text: 'Fondo de emergencia, viajes, entrada de un piso…' },
+  investments: { title: 'Inversiones', text: 'Acciones, fondos, ETF y cripto con rentabilidad.' },
+  loans: { title: 'Préstamos', text: 'Hipotecas y préstamos con cuadro de amortización.' },
+  reports: { title: 'Informes', text: 'Tu año en números y exportación.' }
+};
+const CLIENT_KIND_LABELS = { empresa: 'Empresa', autonomo: 'Autónomo', particular: 'Particular' };
+const PURCHASE_KIND_INFO = {
+  compras: { label: 'Compras y mercaderías', pct: 100 },
+  material: { label: 'Material y equipos', pct: 100, hint: 'Si cuesta más de 300 € y dura varios años, en el IRPF se amortiza (consúltalo con tu asesor).' },
+  suministros: { label: 'Suministros (luz, agua, internet)', pct: 100, hint: 'Si trabajas desde casa: deduce el 30 % de la parte de la vivienda afecta a la actividad.' },
+  alquiler: { label: 'Alquiler de local u oficina', pct: 100, irpf: 19, hint: 'El alquiler de local lleva normalmente retención del 19 % que tú ingresas con el modelo 115.' },
+  telefono: { label: 'Teléfono', pct: 50, hint: 'Si lo usas también para lo personal, lo habitual es deducir el 50 %.' },
+  software: { label: 'Software y suscripciones', pct: 100 },
+  servicios: { label: 'Servicios profesionales', pct: 100 },
+  gestoria: { label: 'Gestoría y asesoría', pct: 100 },
+  publicidad: { label: 'Publicidad y marketing', pct: 100 },
+  formacion: { label: 'Formación', pct: 100 },
+  viajes: { label: 'Viajes y dietas', pct: 100, hint: 'Dietas: hasta 26,67 €/día en España y 48,08 € en el extranjero (pago electrónico).' },
+  vehiculo: { label: 'Vehículo y combustible', pct: 50, hint: 'Hacienda presume un 50 % de uso profesional del IVA; en el IRPF solo si el uso es exclusivo.' },
+  seguros: { label: 'Seguros', pct: 100, hint: 'Seguro de salud: deducible hasta 500 € al año por persona.' },
+  reta: { label: 'Cuota de autónomos (RETA)', pct: 100, noIva: true },
+  otros: { label: 'Otros gastos', pct: 100 }
+};
+const NAV_GROUPS = [
+  { label: '', items: ['resumen', 'movimientos', 'cuentas'] },
+  { label: 'Negocio', items: ['facturas', 'clientes', 'gastos', 'impuestos', 'cuota'] },
+  { label: 'Planificar', items: ['presupuestos', 'recurrentes', 'objetivos'] },
+  { label: 'Patrimonio', items: ['inversiones', 'prestamos'] },
+  { label: '', items: ['informes', 'ajustes'] }
+];
+const VIEW_MODULE = {
+  presupuestos: 'budgets', recurrentes: 'recurring', objetivos: 'goals', inversiones: 'investments',
+  prestamos: 'loans', informes: 'reports', facturas: 'business', clientes: 'business', gastos: 'business',
+  impuestos: 'business', cuota: 'business'
+};
+
+function settings() { return store.data?.settings || {}; }
+function biz() { return settings().business || {}; }
+function moduleOn(key) { return settings().modules?.[key] !== false; }
+function hasBusiness() { return moduleOn('business') && settings().modules?.business === true; }
+function viewEnabled(id) { const m = VIEW_MODULE[id]; return !m || (m === 'business' ? hasBusiness() : moduleOn(m)); }
+function bottomNavItems() {
+  if (hasBusiness()) return ['resumen', 'movimientos', 'facturas', 'impuestos', 'mas'];
+  const pick = (list, not = []) => list.find((v) => viewEnabled(v) && !not.includes(v)) || 'cuentas';
+  const third = pick(['inversiones', 'presupuestos', 'objetivos', 'cuentas']);
+  const fourth = pick(['informes', 'presupuestos', 'recurrentes', 'cuentas'], [third]);
+  return ['resumen', 'movimientos', third, fourth === third ? 'ajustes' : fourth, 'mas'];
+}
+function moreViews() {
+  const bottom = bottomNavItems();
+  return ['mas', ...NAV.map((n) => n.id).filter((id) => !bottom.includes(id))];
+}
+function sideNavHTML() {
+  return NAV_GROUPS.map((g) => {
+    const items = g.items.filter(viewEnabled);
+    if (!items.length) return '';
+    return `${g.label ? `<div class="nav-group">${esc(g.label)}</div>` : '<div class="nav-sep"></div>'}${navHTML(items)}`;
+  }).join('');
+}
+function renderNav() {
+  const side = document.getElementById('sideNav');
+  const bottom = document.getElementById('bottomNav');
+  const key = JSON.stringify([settings().modules, settings().profile]);
+  if (renderNav.key === key && side?.childElementCount) return;
+  renderNav.key = key;
+  if (side) side.innerHTML = sideNavHTML();
+  if (bottom) bottom.innerHTML = navHTML(bottomNavItems(), true);
+}
+
+/* ---------------------------------------------------------------- utilidades fiscales */
+function fmtDate(iso) { return iso ? iso.split('-').reverse().join('/') : ''; }
+function daysUntil(iso) { return Math.round((parseISO(iso) - parseISO(todayISO())) / 86400000); }
+function clientById(id) { return (store.data.clients || []).find((c) => c.id === id) || null; }
+function invoiceStatus(inv) {
+  if (inv.status === 'draft') return { key: 'draft', label: 'Borrador', cls: '' };
+  if (inv.status === 'paid') return { key: 'paid', label: 'Cobrada', cls: 'badge--soft' };
+  if (inv.dueDate && inv.dueDate < todayISO()) return { key: 'overdue', label: 'Vencida', cls: 'badge--danger' };
+  return { key: 'pending', label: 'Pendiente', cls: 'badge--warn' };
+}
+function invTotals(inv) { return F.invoiceTotals(inv); }
+function currentQuarter() { const t = todayISO(); return { year: Number(t.slice(0, 4)), q: F.quarterOf(t) }; }
+/** Trimestre que toca presentar: el anterior mientras dure su plazo, si no el actual. */
+function quarterToFile() {
+  const t = todayISO();
+  const cur = currentQuarter();
+  const prev = cur.q === 1 ? { year: cur.year - 1, q: 4 } : { year: cur.year, q: cur.q - 1 };
+  const d = F.quarterDeadline(prev.year, prev.q);
+  return t <= d.to ? prev : cur;
+}
+function retaMonthlyNow() {
+  const b = biz();
+  if (b.retaMonthly > 0) return b.retaMonthly;
+  if (b.tarifaPlana && F.monthsSince(b.startDate, todayISO()) < 12) return F.RETA_TARIFA_PLANA_MEI;
+  const last = [...(store.data?.purchases || [])].filter((p) => p.kind === 'reta').sort((a, c) => c.date.localeCompare(a.date))[0];
+  return last ? last.base : 0;
+}
+function taxOpts() { return { retaMonthly: retaMonthlyNow(), startDate: biz().startDate || '' }; }
+function quarterLabel(year, q) { return `${q}T ${year}`; }
+function deadlineText(year, q) {
+  const d = F.quarterDeadline(year, q);
+  return `del ${fmtDate(d.from)} al ${fmtDate(d.to)}`;
+}
+function hacienda(year, q) {
+  const m303 = F.modelo303(store.data.invoices, store.data.purchases, year, q);
+  const m130 = F.modelo130(store.data.invoices, store.data.purchases, year, q, taxOpts());
+  const exento130 = m130.pctRetencion >= 0.7;
+  return { m303, m130, exento130, total: round(Math.max(0, m303.resultado) + (exento130 ? 0 : m130.resultado)) };
+}
+function businessReady() { const b = biz(); return Boolean(b.name && b.nif && F.validateNif(b.nif).ok); }
+function nifHint(value) {
+  if (!value) return '';
+  const r = F.validateNif(value);
+  return r.ok ? `<span class="nif-ok">${icon('check', 13)} ${esc(r.type)} válido</span>` : `<span class="nif-bad">${esc(r.message)}</span>`;
+}
+function territoryNotice(t) {
+  if (t === 'canarias') return 'En Canarias no se aplica IVA sino IGIC (tipo general 7 %). Las facturas y el modelo 303 de esta app no sirven para tu caso: usa los modelos 420 del Gobierno de Canarias.';
+  if (t === 'ceutamelilla') return 'En Ceuta y Melilla se aplica el IPSI en lugar del IVA. Los cálculos de IVA de esta app no te sirven.';
+  if (t === 'foral') return 'En País Vasco y Navarra las haciendas forales tienen sus propios modelos, plazos y sistemas (TicketBAI). Los modelos 303/130 de esta app son orientativos.';
+  return '';
+}
+
+/* ---------------------------------------------------------------- bienvenida */
+function obState() {
+  if (!ui.ob) {
+    const s = settings();
+    ui.ob = { step: 0, profile: s.profile || 'autonomo', modules: null, business: { ...(s.business || {}) } };
+  }
+  return ui.ob;
+}
+function defaultModulesFor(profile) {
+  const business = profile !== 'personal';
+  return { business, budgets: profile !== 'autonomo', recurring: true, goals: profile !== 'autonomo', investments: profile === 'personal', loans: false, reports: true };
+}
+function obSteps(ob) { return ob.profile === 'personal' ? ['perfil', 'secciones', 'empezar'] : ['perfil', 'negocio', 'secciones', 'empezar']; }
+function viewOnboarding() {
+  const ob = obState();
+  const steps = obSteps(ob);
+  const step = steps[Math.min(ob.step, steps.length - 1)];
+  const mods = ob.modules || defaultModulesFor(ob.profile);
+  const dots = steps.map((s, i) => `<i class="${i <= ob.step ? 'on' : ''}"></i>`).join('');
+  let body = '';
+  if (step === 'perfil') {
+    body = `<h1>Bienvenido a Mi Cartera</h1>
+      <p class="ob-lead">Tu gestoría privada: facturas con IVA e IRPF, impuestos trimestrales y cuota de autónomos, sin subir tus datos a ninguna nube. ¿Para qué la vas a usar?</p>
+      <div class="ob-choices">${Object.entries(PROFILE_LABELS).map(([k, p]) => `<button type="button" class="ob-choice${ob.profile === k ? ' active' : ''}" data-action="ob-profile" data-value="${k}">
+        <span class="more-icon">${icon(p.icon, 20)}</span><span><b>${esc(p.title)}</b><span>${esc(p.text)}</span></span></button>`).join('')}</div>`;
+  } else if (step === 'negocio') {
+    const b = ob.business;
+    body = `<h1>Tus datos fiscales</h1>
+      <p class="ob-lead">Aparecerán en tus facturas. Puedes completarlos o cambiarlos más tarde en Ajustes.</p>
+      <form class="ob-form" id="obBusiness" novalidate>
+        <div class="form-grid">
+          <div class="field"><span>Nombre y apellidos o razón social</span><input name="name" maxlength="120" value="${esc(b.name || '')}" placeholder="Ej. Lucía Gómez Pérez"></div>
+          <div class="field"><span>NIF / NIE</span><input name="nif" maxlength="20" value="${esc(b.nif || '')}" placeholder="12345678Z" data-nif autocapitalize="characters"><small class="nif-hint">${nifHint(b.nif)}</small></div>
+        </div>
+        <div class="field"><span>Dirección fiscal</span><input name="address" maxlength="160" value="${esc(b.address || '')}" placeholder="Calle, número, piso"></div>
+        <div class="form-grid form-grid--3">
+          <div class="field"><span>Código postal</span><input name="zip" maxlength="10" inputmode="numeric" value="${esc(b.zip || '')}"></div>
+          <div class="field"><span>Localidad</span><input name="city" maxlength="80" value="${esc(b.city || '')}"></div>
+          <div class="field"><span>Provincia</span><input name="province" maxlength="80" value="${esc(b.province || '')}"></div>
+        </div>
+        <div class="form-grid">
+          <div class="field"><span>Tipo de actividad</span><select name="activity">
+            <option value="profesional"${b.activity !== 'empresarial' ? ' selected' : ''}>Profesional (diseño, consultoría…)</option>
+            <option value="empresarial"${b.activity === 'empresarial' ? ' selected' : ''}>Empresarial (comercio, oficios…)</option>
+          </select></div>
+          <div class="field"><span>Fecha de alta como autónomo</span><input name="startDate" type="date" value="${esc(b.startDate || '')}"></div>
+        </div>
+        <div class="form-grid">
+          <div class="field"><span>Retención de IRPF en tus facturas</span><select name="irpfRate">
+            ${F.IRPF_OPTIONS.filter((o) => [15, 7, 0].includes(o.value)).map((o) => `<option value="${o.value}"${Number(b.irpfRate ?? 15) === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}
+          </select></div>
+          <div class="field"><span>Dónde tributas</span><select name="territory">
+            <option value="comun"${(b.territory || 'comun') === 'comun' ? ' selected' : ''}>Península y Baleares (IVA)</option>
+            <option value="canarias"${b.territory === 'canarias' ? ' selected' : ''}>Canarias (IGIC)</option>
+            <option value="ceutamelilla"${b.territory === 'ceutamelilla' ? ' selected' : ''}>Ceuta o Melilla (IPSI)</option>
+            <option value="foral"${b.territory === 'foral' ? ' selected' : ''}>País Vasco o Navarra (foral)</option>
+          </select></div>
+        </div>
+        <label class="checkbox"><input type="checkbox" name="tarifaPlana"${b.tarifaPlana ? ' checked' : ''}> Estoy con la tarifa plana (80 € al mes los primeros 12 meses)</label>
+        <p class="ob-warn" data-territory-note${territoryNotice(b.territory) ? '' : ' hidden'}>${icon('alert', 15)} <span>${esc(territoryNotice(b.territory))}</span></p>
+      </form>`;
+  } else if (step === 'secciones') {
+    body = `<h1>Elige qué quieres ver</h1>
+      <p class="ob-lead">Empieza solo con lo que necesitas. Podrás activar el resto cuando quieras en Ajustes → Secciones.</p>
+      <div class="ob-modules">${Object.entries(MODULE_INFO).map(([k, m]) => `<label class="ob-module"><input type="checkbox" data-ob-module="${k}"${mods[k] ? ' checked' : ''}><span><b>${esc(m.title)}</b><span>${esc(m.text)}</span></span></label>`).join('')}</div>`;
+  } else {
+    body = `<h1>¿Cómo quieres empezar?</h1>
+      <p class="ob-lead">Puedes explorar con datos de ejemplo y borrarlos después desde Ajustes, o empezar directamente con los tuyos.</p>
+      <div class="ob-choices">
+        <button type="button" class="ob-choice" data-action="ob-finish" data-demo="0"><span class="more-icon">${icon('plus', 20)}</span><span><b>Empezar con mis datos</b><span>La app arranca vacía con una guía de primeros pasos.</span></span></button>
+        <button type="button" class="ob-choice" data-action="ob-finish" data-demo="1"><span class="more-icon">${icon('sparkles', 20)}</span><span><b>Ver un ejemplo</b><span>${ob.profile === 'personal' ? 'Seis meses de movimientos, objetivos e inversiones ficticias.' : 'Clientes, facturas, gastos y trimestres de un autónomo ficticio.'}</span></span></button>
+      </div>`;
+  }
+  return `<section class="onboarding">
+    <div class="ob-card">
+      <div class="ob-top"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div class="ob-dots">${dots}</div></div>
+      ${body}
+      <div class="ob-foot">
+        ${ob.step > 0 ? `<button type="button" class="btn btn-ghost" data-action="ob-back">${icon('arrowLeft', 16)} Atrás</button>` : '<span></span>'}
+        ${step !== 'empezar' ? `<button type="button" class="btn btn-primary" data-action="ob-next">Continuar ${icon('arrowRight', 16)}</button>` : ''}
+      </div>
+    </div>
+  </section>`;
+}
+function obCollectBusiness() {
+  const form = document.getElementById('obBusiness');
+  if (!form) return;
+  const fd = new FormData(form);
+  const ob = obState();
+  for (const k of ['name', 'nif', 'address', 'zip', 'city', 'province', 'activity', 'startDate', 'territory']) ob.business[k] = String(fd.get(k) || '').trim();
+  ob.business.nif = ob.business.nif.toUpperCase().replace(/[\s.-]/g, '');
+  ob.business.irpfRate = Number(fd.get('irpfRate'));
+  ob.business.tarifaPlana = fd.get('tarifaPlana') === 'on';
+}
+async function obFinish(demo) {
+  const ob = obState();
+  const mods = ob.modules || defaultModulesFor(ob.profile);
+  const body = { profile: ob.profile, modules: mods, onboarded: true };
+  if (ob.profile !== 'personal') {
+    const b = { ...ob.business };
+    if (b.nif && !F.validateNif(b.nif).ok) b.nif = '';
+    if (b.tarifaPlana && !b.retaMonthly) b.retaMonthly = F.RETA_TARIFA_PLANA_MEI;
+    body.business = b;
+  }
+  await api('PATCH', 'api/settings', body);
+  if (demo) await api('POST', 'api/demo');
+  ui.ob = null;
+  renderNav.key = null;
+  location.hash = '#/resumen';
+  render();
+  toast(demo ? 'Datos de ejemplo cargados. Bórralos en Ajustes cuando quieras.' : 'Todo listo. Sigue los primeros pasos.');
+}
+
+/* ---------------------------------------------------------------- primeros pasos y resumen */
+function firstSteps() {
+  const d = store.data;
+  const steps = [];
+  if (hasBusiness()) {
+    steps.push({ done: businessReady(), title: 'Completa tus datos fiscales', text: 'Nombre, NIF y dirección para tus facturas.', action: 'edit-business' });
+    steps.push({ done: (d.clients || []).length > 0, title: 'Añade tu primer cliente', text: 'Con su NIF se valida al momento.', action: 'new-client' });
+    steps.push({ done: (d.invoices || []).some((i) => i.number), title: 'Emite tu primera factura', text: 'El IVA y la retención se calculan solos.', action: 'new-invoice' });
+    steps.push({ done: (d.purchases || []).length > 0, title: 'Apunta un gasto deducible', text: 'Así se resta en tu IVA y en tu IRPF.', action: 'new-purchase' });
+  }
+  steps.push({ done: d.transactions.length > 0, title: hasBusiness() ? 'Registra un movimiento personal' : 'Registra tu primer movimiento', text: 'Un gasto o ingreso de tu día a día.', action: 'new-tx' });
+  if (moduleOn('budgets') && !hasBusiness()) steps.push({ done: d.categories.some((c) => c.budget > 0), title: 'Ponte un presupuesto', text: 'Un límite mensual para una categoría.', action: 'edit-budgets' });
+  return steps;
+}
+function firstStepsCard() {
+  if (localStorage.getItem('mc-steps-hidden') === '1') return '';
+  const steps = firstSteps();
+  const done = steps.filter((s) => s.done).length;
+  if (done === steps.length) return '';
+  return `<section class="card steps-card">
+    <div class="card-head">
+      <div><h2>Primeros pasos</h2><p>${done} de ${steps.length} completados</p></div>
+      <button class="btn btn-ghost btn-sm" type="button" data-action="hide-steps">Ocultar</button>
+    </div>
+    <div class="progress"><i style="width:${((done / steps.length) * 100).toFixed(0)}%"></i></div>
+    <div class="steps-list">${steps.map((s) => `<button type="button" class="step-item${s.done ? ' done' : ''}" data-action="${s.action}"${s.done ? ' disabled' : ''}>
+      <span class="step-check">${s.done ? icon('check', 14) : ''}</span>
+      <span class="step-text"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></span>
+      ${s.done ? '' : icon('chevronRight', 16)}
+    </button>`).join('')}</div>
+  </section>`;
+}
+function businessSummaryHTML() {
+  if (!hasBusiness()) return '';
+  const cur = currentQuarter();
+  const h = hacienda(cur.year, cur.q);
+  const pending = (store.data.invoices || []).filter((i) => i.status === 'issued');
+  const pendingTotal = round(sum(pending, (i) => i.total));
+  const overdue = pending.filter((i) => i.dueDate && i.dueDate < todayISO()).length;
+  const next = F.upcomingDeadlines(todayISO(), { count: 1 })[0];
+  const left = next ? daysUntil(next.to) : null;
+  const notice = territoryNotice(biz().territory);
+  return `${notice ? `<div class="banner">${icon('alert', 17)}<span>${esc(notice)}</span></div>` : ''}
+  <div class="statgrid">
+    ${statCard(`Facturado ${quarterLabel(cur.year, cur.q)}`, bigMoney(h.m130.ingresos - (cur.q > 1 ? F.modelo130(store.data.invoices, store.data.purchases, cur.year, cur.q - 1, taxOpts()).ingresos : 0)), `<span>Base imponible sin IVA</span>`, 'income', 'invoice')}
+    ${statCard('Aparta para Hacienda', bigMoney(h.total), `<span>IVA ${esc(money(Math.max(0, h.m303.resultado), { decimals: 0 }))}${h.exento130 ? '' : ` · IRPF ${esc(money(h.m130.resultado, { decimals: 0 }))}`} este trimestre</span>`, 'expense', 'percent')}
+    ${statCard('Pendiente de cobro', bigMoney(pendingTotal), `<span>${pending.length} factura${pending.length === 1 ? '' : 's'}${overdue ? ` · <b class="neg">${overdue} vencida${overdue === 1 ? '' : 's'}</b>` : ''}</span>`, 'net', 'calendar')}
+  </div>
+  ${next ? `<a class="banner banner--link" href="#/impuestos">${icon('calendar', 17)}<span><b>${esc(next.title)}</b> · ${left <= 0 ? 'termina hoy' : `quedan ${left} días`} (hasta el ${esc(fmtDate(next.to))})</span>${icon('chevronRight', 16)}</a>` : ''}`;
+}
+
+function recentInvoicesCard() {
+  const list = [...(store.data.invoices || [])].sort((a, b) => b.date.localeCompare(a.date) || (b.seq || 0) - (a.seq || 0)).slice(0, 5);
+  return `<section class="card">
+    <div class="card-head">
+      <div><h2>Últimas facturas</h2><p>Emitidas y borradores</p></div>
+      <a class="card-link" href="#/facturas">Ver todas ${icon('arrowRight', 14)}</a>
+    </div>
+    ${list.length ? `<div class="txlist compact">${list.map((inv) => {
+      const st = invoiceStatus(inv);
+      return `<button type="button" class="txrow" data-action="open-invoice" data-id="${esc(inv.id)}">
+        <span class="tx-icon" style="background:var(--fill);color:var(--muted)">${icon('invoice', 18)}</span>
+        <span class="tx-main"><span class="tx-title">${esc(inv.buyer?.name || clientById(inv.clientId)?.name || 'Sin cliente')}</span><span class="tx-meta">${esc(inv.number || 'Borrador')} · ${esc(fmtDate(inv.date))} · <span class="badge ${st.cls}">${st.label}</span></span></span>
+        <span class="tx-amt income">${esc(money(inv.total ?? invTotals(inv).total))}</span>
+      </button>`;
+    }).join('')}</div>`
+      : `<div class="empty"><span class="empty-icon">🧾</span><h3>Sin facturas</h3><p>Crea tu primera factura: el IVA y la retención se calculan solos.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-invoice">Nueva factura</button></div>`}
+  </section>`;
+}
+
+/* ---------------------------------------------------------------- vista: facturas */
+function viewFacturas() {
+  const d = store.data;
+  const filter = ui.invFilter || 'all';
+  const all = [...(d.invoices || [])].sort((a, b) => (b.date.localeCompare(a.date)) || ((b.seq || 0) - (a.seq || 0)));
+  const list = all.filter((i) => filter === 'all' || invoiceStatus(i).key === filter || (filter === 'pending' && invoiceStatus(i).key === 'overdue'));
+  const cur = currentQuarter();
+  const { start, end } = F.quarterRange(cur.year, cur.q);
+  const qInv = all.filter((i) => i.number && i.date >= start && i.date <= end);
+  const qBase = round(sum(qInv, (i) => invTotals(i).base));
+  const qIva = round(sum(qInv, (i) => invTotals(i).iva));
+  const pending = all.filter((i) => i.status === 'issued');
+  const ready = businessReady();
+  const counts = { all: all.length, draft: all.filter((i) => i.status === 'draft').length, pending: pending.length, paid: all.filter((i) => i.status === 'paid').length };
+  return `
+  <div class="viewhead">
+    <div><h1>Facturas</h1><p>Numeración correlativa, IVA y retención de IRPF calculados al momento.</p></div>
+    <div class="head-actions">
+      <button class="btn btn-ghost" type="button" data-action="new-client">${icon('users', 16)} Nuevo cliente</button>
+      <button class="btn btn-primary" type="button" data-action="new-invoice">${icon('plus', 16)} Nueva factura</button>
+    </div>
+  </div>
+  ${ready ? '' : `<div class="banner">${icon('alert', 17)}<span><b>Faltan tus datos fiscales.</b> Puedes preparar borradores, pero para emitir necesitas nombre y NIF.</span><button class="btn btn-soft btn-sm" type="button" data-action="edit-business">Completar</button></div>`}
+  <div class="statgrid">
+    ${statCard(`Base facturada ${quarterLabel(cur.year, cur.q)}`, bigMoney(qBase), `<span>${qInv.length} factura${qInv.length === 1 ? '' : 's'} emitida${qInv.length === 1 ? '' : 's'}</span>`, 'income', 'invoice')}
+    ${statCard('IVA repercutido', bigMoney(qIva), '<span>No es tuyo: se ingresa en el 303</span>', 'expense', 'percent')}
+    ${statCard('Pendiente de cobro', bigMoney(round(sum(pending, (i) => i.total))), `<span>${pending.filter((i) => i.dueDate && i.dueDate < todayISO()).length} vencidas</span>`, 'net', 'calendar')}
+  </div>
+  <section class="card">
+    <div class="card-head">
+      <div class="seg" role="group" aria-label="Filtrar facturas">
+        ${[['all', 'Todas'], ['draft', 'Borradores'], ['pending', 'Pendientes'], ['paid', 'Cobradas']].map(([k, l]) => `<button type="button" data-action="inv-filter" data-value="${k}" class="${filter === k ? 'active' : ''}">${l} <span class="seg-count">${counts[k]}</span></button>`).join('')}
+      </div>
+    </div>
+    ${list.length ? `<div class="table-wrap"><table class="report-table doc-table">
+      <thead><tr><th>Número</th><th class="hide-m">Fecha</th><th>Cliente</th><th class="hide-m">Base</th><th>Total</th><th class="hide-m">Estado</th></tr></thead>
+      <tbody>${list.map((inv) => {
+        const st = invoiceStatus(inv);
+        const t = invTotals(inv);
+        const c = inv.buyer || clientById(inv.clientId);
+        return `<tr class="row-link" data-action="open-invoice" data-id="${esc(inv.id)}" tabindex="0">
+          <td>${inv.number ? esc(inv.number) : '<span class="muted">Sin número</span>'}${inv.kind === 'rectificativa' ? ' <span class="badge">Rectificativa</span>' : ''}<span class="cell-sub show-m">${esc(fmtDate(inv.date))}</span></td>
+          <td class="hide-m">${esc(fmtDate(inv.date))}</td>
+          <td class="cell-text">${esc(c?.name || '—')}<span class="cell-sub show-m"><span class="badge ${st.cls}">${st.label}</span></span></td>
+          <td class="hide-m">${esc(money(t.base))}</td>
+          <td><b>${esc(money(inv.total ?? t.total))}</b></td>
+          <td class="hide-m"><span class="badge ${st.cls}">${st.label}</span></td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`
+      : `<div class="empty"><span class="empty-icon">🧾</span><h3>${all.length ? 'Nada en este filtro' : 'Aún no has hecho facturas'}</h3><p>Crea un cliente y tu primera factura: Mi Cartera aplica el IVA, la retención y la numeración por ti.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-invoice">Nueva factura</button></div>`}
+  </section>
+  <p class="tiny legal-note">Las facturas cumplen el contenido del Reglamento de facturación (RD 1619/2012). Mi Cartera no es todavía un sistema certificado Verifactu: consulta la sección Impuestos.</p>`;
+}
+
+function clientOptions(selected) {
+  const clients = [...(store.data.clients || [])].sort((a, b) => a.name.localeCompare(b.name));
+  return `<option value="">Elige un cliente…</option>${clients.map((c) => `<option value="${esc(c.id)}"${c.id === selected ? ' selected' : ''}>${esc(c.name)}${c.nif ? ` · ${esc(c.nif)}` : ''}</option>`).join('')}<option value="__new">+ Nuevo cliente…</option>`;
+}
+function lineRowHTML(l = {}, taxMode = 'normal') {
+  const rate = l.ivaRate ?? biz().ivaRate ?? 21;
+  return `<div class="inv-line">
+    <input class="input" name="l_desc" maxlength="300" placeholder="Concepto (ej. Diseño de logotipo)" value="${esc(l.desc || '')}" aria-label="Concepto">
+    <input class="input" name="l_qty" type="number" step="0.001" inputmode="decimal" value="${esc(l.qty ?? 1)}" aria-label="Cantidad">
+    <input class="input" name="l_price" type="number" step="0.01" inputmode="decimal" placeholder="0,00" value="${l.price !== undefined ? esc(l.price) : ''}" aria-label="Precio unitario sin IVA">
+    <select class="select" name="l_iva" aria-label="IVA"${taxMode !== 'normal' ? ' disabled' : ''}>${F.IVA_RATES.map((r) => `<option value="${r}"${Number(rate) === r ? ' selected' : ''}>${r} %</option>`).join('')}</select>
+    <button type="button" class="icon-btn" data-line-remove aria-label="Quitar línea">${icon('trash', 16)}</button>
+  </div>`;
+}
+function readInvoiceForm(form) {
+  const fd = new FormData(form);
+  const descs = fd.getAll('l_desc');
+  const qtys = fd.getAll('l_qty');
+  const prices = fd.getAll('l_price');
+  const ivas = [...form.querySelectorAll('select[name="l_iva"]')].map((s) => s.value);
+  const lines = descs.map((desc, i) => ({ desc: String(desc).trim(), qty: Number(qtys[i]) || 0, price: Number(prices[i]) || 0, discount: 0, ivaRate: Number(ivas[i]) })).filter((l) => l.desc || l.price);
+  return {
+    clientId: fd.get('clientId') === '__new' ? '' : fd.get('clientId'),
+    date: fd.get('date'), opDate: fd.get('opDate') || '', dueDate: fd.get('dueDate') || '',
+    taxMode: fd.get('taxMode') || 'normal', irpfRate: Number(fd.get('irpfRate')) || 0, recargo: fd.get('recargo') === 'on',
+    note: String(fd.get('note') || '').trim(), lines
+  };
+}
+function totalsBoxHTML(data) {
+  const t = F.invoiceTotals(data);
+  const mention = F.TAX_MODES[t.mode]?.mention;
+  return `<div class="inv-totals">
+    <div><span>Base imponible</span><b>${esc(money(t.base))}</b></div>
+    ${t.mode === 'normal' ? t.byRate.map((g) => `<div><span>IVA ${g.rate} %${t.byRate.length > 1 ? ` sobre ${esc(money(g.base))}` : ''}</span><b>${esc(money(g.iva))}</b></div>`).join('') : `<div><span>IVA</span><b>${esc(money(0))}</b></div>`}
+    ${t.re ? `<div><span>Recargo de equivalencia</span><b>${esc(money(t.re))}</b></div>` : ''}
+    ${t.irpf ? `<div><span>Retención IRPF ${t.irpfRate} %</span><b>−${esc(money(t.irpf))}</b></div>` : ''}
+    <div class="inv-total"><span>Total a cobrar</span><b>${esc(money(t.total))}</b></div>
+    ${mention ? `<small>${esc(mention)}</small>` : ''}
+  </div>`;
+}
+function clientDefaults(client) {
+  const b = biz();
+  const irpf = client?.irpfRate !== null && client?.irpfRate !== undefined ? client.irpfRate
+    : (!client || client.kind === 'particular' || b.activity === 'empresarial' ? 0 : (b.irpfRate ?? 15));
+  return { taxMode: client?.taxMode || 'normal', irpfRate: irpf, recargo: Boolean(client?.recargo) };
+}
+function openInvoiceModal(inv = null, template = null) {
+  const src = inv || template || {};
+  const isDraft = !inv || inv.status === 'draft';
+  if (!isDraft) return openInvoiceView(inv);
+  const firstClient = src.clientId ? clientById(src.clientId) : null;
+  const defs = src.clientId ? { taxMode: src.taxMode || 'normal', irpfRate: src.irpfRate ?? 0, recargo: Boolean(src.recargo) } : clientDefaults(firstClient);
+  const irpfVals = [...new Set([...F.IRPF_OPTIONS.map((o) => o.value), Number(defs.irpfRate)])];
+  const lines = src.lines?.length ? src.lines : [{ qty: 1 }];
+  openSheet({
+    title: inv ? 'Editar borrador' : (template ? 'Duplicar factura' : 'Nueva factura'),
+    subtitle: businessReady() ? `Se numerará como ${biz().series || 'F'}${(src.date || todayISO()).slice(0, 4)}-… al emitirla.` : 'Completa tus datos fiscales en Ajustes para poder emitirla.',
+    wide: true,
+    submitLabel: 'Emitir factura',
+    secondaryLabel: 'Guardar borrador',
+    dangerLabel: inv ? 'Eliminar' : '',
+    body: `
+      <div class="form-grid">
+        <div class="field"><span>Cliente</span><select name="clientId" data-inv-client>${clientOptions(src.clientId)}</select></div>
+        <div class="field"><span>Fecha de la factura</span><input name="date" type="date" value="${esc(src.date && inv ? src.date : todayISO())}" required></div>
+      </div>
+      <div class="field"><span>Conceptos <span class="hint">(precios sin IVA)</span></span>
+        <div class="inv-lines-head"><span>Descripción</span><span>Cant.</span><span>Precio</span><span>IVA</span><span></span></div>
+        <div class="inv-lines" data-lines>${lines.map((l) => lineRowHTML(l, defs.taxMode)).join('')}</div>
+        <button type="button" class="btn btn-ghost btn-sm" data-line-add style="align-self:flex-start">${icon('plus', 14)} Añadir línea</button>
+      </div>
+      <div class="form-grid">
+        <div class="field"><span>Tipo de operación</span><select name="taxMode">${Object.entries(F.TAX_MODES).map(([k, m]) => `<option value="${k}"${defs.taxMode === k ? ' selected' : ''}>${esc(m.label)}</option>`).join('')}</select></div>
+        <div class="field"><span>Retención de IRPF</span><select name="irpfRate">${irpfVals.map((v) => `<option value="${v}"${Number(defs.irpfRate) === v ? ' selected' : ''}>${esc(F.IRPF_OPTIONS.find((o) => o.value === v)?.label || `${v} %`)}</option>`).join('')}</select></div>
+      </div>
+      <label class="checkbox"><input type="checkbox" name="recargo"${defs.recargo ? ' checked' : ''}> Aplicar recargo de equivalencia (cliente comerciante minorista)</label>
+      <details class="howto"><summary>Más opciones</summary>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><span>Fecha de la operación <span class="hint">(si es distinta)</span></span><input name="opDate" type="date" value="${esc(src.opDate || '')}"></div>
+          <div class="field"><span>Vencimiento <span class="hint">(por defecto ${esc(biz().paymentDays ?? 30)} días)</span></span><input name="dueDate" type="date" value="${esc(inv ? src.dueDate || '' : '')}"></div>
+        </div>
+        <div class="field" style="margin-top:10px"><span>Notas en la factura <span class="hint">(opcional)</span></span><input name="note" maxlength="600" value="${esc(src.note || '')}" placeholder="Ej. Proyecto web, fase 1"></div>
+      </details>
+      <div data-inv-totals>${totalsBoxHTML({ ...defs, lines })}</div>`,
+    onMount(dialog, form) {
+      const linesHost = dialog.querySelector('[data-lines]');
+      const update = () => {
+        const data = readInvoiceForm(form);
+        const mode = data.taxMode;
+        form.querySelectorAll('select[name="l_iva"]').forEach((s) => { s.disabled = mode !== 'normal'; });
+        dialog.querySelector('[data-inv-totals]').innerHTML = totalsBoxHTML(data);
+      };
+      dialog.querySelector('[data-line-add]').addEventListener('click', () => {
+        linesHost.insertAdjacentHTML('beforeend', lineRowHTML({ qty: 1 }, form.taxMode.value));
+        linesHost.lastElementChild.querySelector('input').focus();
+        update();
+      });
+      linesHost.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-line-remove]');
+        if (!btn) return;
+        if (linesHost.children.length > 1) btn.closest('.inv-line').remove();
+        else btn.closest('.inv-line').querySelectorAll('input').forEach((i) => { i.value = i.name === 'l_qty' ? 1 : ''; });
+        update();
+      });
+      const clientSel = dialog.querySelector('[data-inv-client]');
+      clientSel.addEventListener('change', () => {
+        if (clientSel.value === '__new') {
+          clientSel.value = '';
+          openClientModal(null, (created) => {
+            clientSel.innerHTML = clientOptions(created?.id);
+            clientSel.dispatchEvent(new Event('change'));
+          });
+          return;
+        }
+        const d = clientDefaults(clientById(clientSel.value));
+        form.taxMode.value = d.taxMode;
+        if (![...form.irpfRate.options].some((o) => Number(o.value) === Number(d.irpfRate))) form.irpfRate.insertAdjacentHTML('beforeend', `<option value="${d.irpfRate}">${d.irpfRate} %</option>`);
+        form.irpfRate.value = String(d.irpfRate);
+        form.recargo.checked = d.recargo;
+        update();
+      });
+      form.addEventListener('input', update);
+      form.addEventListener('change', update);
+    },
+    async onSecondary(dialog, form) {
+      const data = readInvoiceForm(form);
+      if (inv) await api('PATCH', `api/invoices/${inv.id}`, data);
+      else await api('POST', 'api/invoices', data);
+      dialog.close();
+      render();
+      toast('Borrador guardado');
+    },
+    async onSubmit(fd, dialog) {
+      const data = readInvoiceForm(dialog.querySelector('form'));
+      if (!data.clientId) throw new Error('Elige un cliente.');
+      if (!businessReady()) throw new Error('Antes de emitir, completa tu nombre y NIF en Ajustes → Mi negocio.');
+      const ok = await confirmDialog({ title: 'Emitir factura', message: 'Una factura emitida recibe número y ya no se puede modificar ni borrar (solo rectificar). ¿Emitir ahora?', confirm: 'Emitir', danger: false });
+      if (!ok) return false;
+      const res = inv ? await api('PATCH', `api/invoices/${inv.id}`, { ...data, issue: true }) : await api('POST', 'api/invoices', { ...data, issue: true });
+      render();
+      const created = byId(store.data.invoices, inv?.id || res.createdId);
+      toast(`Factura ${created?.number || ''} emitida`);
+      if (created) setTimeout(() => openInvoiceView(created), 120);
+    },
+    async onDanger(dialog) {
+      const ok = await confirmDialog({ title: 'Eliminar borrador', message: 'El borrador se borrará. No afecta a la numeración.' });
+      if (!ok) return;
+      await api('DELETE', `api/invoices/${inv.id}`);
+      dialog.close();
+      render();
+      toast('Borrador eliminado');
+    }
+  });
+}
+function openInvoiceView(inv) {
+  const st = invoiceStatus(inv);
+  const rect = inv.rectifiesId ? byId(store.data.invoices, inv.rectifiesId) : null;
+  const rectBy = (store.data.invoices || []).filter((i) => i.rectifiesId === inv.id);
+  openSheet({
+    title: `Factura ${inv.number}`,
+    subtitle: `${inv.buyer?.name || ''} · ${fmtDate(inv.date)}`,
+    wide: true,
+    hideSubmit: true,
+    body: `
+      <div class="inv-view-head"><span class="badge ${st.cls}">${st.label}</span>
+        ${inv.status === 'paid' ? `<span class="tiny">Cobrada el ${esc(fmtDate(inv.paidDate))}</span>` : inv.dueDate ? `<span class="tiny">Vence el ${esc(fmtDate(inv.dueDate))}</span>` : ''}
+        ${rect ? `<span class="tiny">Rectifica a ${esc(rect.number || '')}</span>` : ''}
+        ${rectBy.length ? `<span class="tiny">Rectificada por ${rectBy.map((r) => esc(r.number || 'borrador')).join(', ')}</span>` : ''}
+      </div>
+      <div class="inv-preview">${invoiceDocBody(inv)}</div>
+      <div class="inv-actions">
+        <button type="button" class="btn btn-primary btn-sm" data-action="print-invoice" data-id="${esc(inv.id)}">${icon('download', 14)} PDF / imprimir</button>
+        ${inv.status === 'paid'
+          ? `<button type="button" class="btn btn-ghost btn-sm" data-action="unpay-invoice" data-id="${esc(inv.id)}">Marcar como pendiente</button>`
+          : `<button type="button" class="btn btn-soft btn-sm" data-action="pay-invoice" data-id="${esc(inv.id)}">${icon('check', 14)} Marcar como cobrada</button>`}
+        <button type="button" class="btn btn-ghost btn-sm" data-action="duplicate-invoice" data-id="${esc(inv.id)}">${icon('copy', 14)} Duplicar</button>
+        ${inv.kind !== 'rectificativa' ? `<button type="button" class="btn btn-ghost btn-sm" data-action="rectify-invoice" data-id="${esc(inv.id)}">${icon('refresh', 14)} Rectificar</button>` : ''}
+      </div>
+      <p class="tiny">Una factura emitida no se puede editar ni borrar. Si hay un error, emite una rectificativa: la app la prepara con los importes en negativo.</p>`
+  });
+}
+function invoiceDocBody(inv) {
+  const t = invTotals(inv);
+  const s = inv.seller || biz();
+  const c = inv.buyer || clientById(inv.clientId) || {};
+  const rect = inv.rectifiesId ? byId(store.data.invoices, inv.rectifiesId) : null;
+  const mention = F.TAX_MODES[t.mode]?.mention;
+  const addr = (x) => [x.address, [x.zip, x.city].filter(Boolean).join(' '), x.province, x.country && x.country !== 'España' ? x.country : ''].filter(Boolean).map(esc).join('<br>');
+  const fm = (n) => esc(money(n));
+  return `<div class="idoc">
+    <div class="idoc-head">
+      <div><div class="idoc-title">${inv.kind === 'rectificativa' ? 'Factura rectificativa' : 'Factura'}</div>
+        <div class="idoc-num">${inv.number ? `Nº ${esc(inv.number)}` : 'BORRADOR · sin validez'}</div></div>
+      <div class="idoc-dates">
+        <div><span>Fecha de expedición</span><b>${esc(fmtDate(inv.date))}</b></div>
+        ${inv.opDate && inv.opDate !== inv.date ? `<div><span>Fecha de operación</span><b>${esc(fmtDate(inv.opDate))}</b></div>` : ''}
+        ${inv.dueDate ? `<div><span>Vencimiento</span><b>${esc(fmtDate(inv.dueDate))}</b></div>` : ''}
+      </div>
+    </div>
+    <div class="idoc-parties">
+      <div><span class="idoc-label">Emisor</span><b>${esc(s.name || 'Tu nombre')}</b>${s.tradeName ? `<br>${esc(s.tradeName)}` : ''}<br>NIF: ${esc(s.nif || '—')}<br>${addr(s)}${s.email ? `<br>${esc(s.email)}` : ''}</div>
+      <div><span class="idoc-label">Cliente</span><b>${esc(c.name || '—')}</b><br>${c.nif ? `NIF: ${esc(c.nif)}<br>` : ''}${addr(c)}</div>
+    </div>
+    ${rect ? `<p class="idoc-note">Rectifica la factura ${esc(rect.number || '')} de fecha ${esc(fmtDate(rect.date))}. Motivo: ${esc(inv.rectifyReason || 'corrección')}.</p>` : ''}
+    <table class="idoc-lines"><thead><tr><th>Concepto</th><th>Cant.</th><th>Precio</th><th>IVA</th><th>Importe</th></tr></thead>
+      <tbody>${t.lines.map((l) => `<tr><td>${esc(l.desc)}</td><td>${esc(String(l.qty).replace('.', ','))}</td><td>${fm(l.price)}</td><td>${t.mode === 'normal' ? `${l.ivaRate} %` : '—'}</td><td>${fm(l.base)}</td></tr>`).join('')}</tbody></table>
+    <div class="idoc-totals">
+      <div><span>Base imponible</span><b>${fm(t.base)}</b></div>
+      ${t.mode === 'normal' ? t.byRate.map((g) => `<div><span>IVA ${g.rate} % s/ ${fm(g.base)}</span><b>${fm(g.iva)}</b></div>`).join('') : ''}
+      ${t.re ? t.byRate.filter((g) => g.re).map((g) => `<div><span>Recargo equivalencia ${F.RECARGO[g.rate]} %</span><b>${fm(g.re)}</b></div>`).join('') : ''}
+      ${t.irpf ? `<div><span>Retención IRPF ${t.irpfRate} %</span><b>−${fm(t.irpf)}</b></div>` : ''}
+      <div class="idoc-grand"><span>Total</span><b>${fm(t.total)}</b></div>
+    </div>
+    ${mention ? `<p class="idoc-note">${esc(mention)}</p>` : ''}
+    ${inv.note ? `<p class="idoc-note">${esc(inv.note)}</p>` : ''}
+    ${s.iban ? `<p class="idoc-note">Forma de pago: transferencia a ${esc(s.iban)}</p>` : ''}
+    ${s.footer ? `<p class="idoc-foot">${esc(s.footer)}</p>` : ''}
+  </div>`;
+}
+function printInvoice(inv) {
+  const css = `*{box-sizing:border-box}body{font-family:Inter,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1c1c1e;margin:0;padding:32px;font-size:12.5px;line-height:1.45}
+  .idoc-head{display:flex;justify-content:space-between;gap:20px;border-bottom:2px solid #1c1c1e;padding-bottom:14px;margin-bottom:18px}
+  .idoc-title{font-size:24px;font-weight:650;letter-spacing:-.02em}.idoc-num{font-size:14px;color:#555;margin-top:2px}
+  .idoc-dates{text-align:right}.idoc-dates div{margin-bottom:3px}.idoc-dates span,.idoc-label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#777}
+  .idoc-parties{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:20px}.idoc-label{margin-bottom:4px}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px}th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#777;text-align:right;border-bottom:1px solid #ccc;padding:6px}
+  td{text-align:right;padding:8px 6px;border-bottom:1px solid #eee;vertical-align:top}th:first-child,td:first-child{text-align:left}
+  .idoc-totals{margin-left:auto;width:300px}.idoc-totals div{display:flex;justify-content:space-between;padding:4px 0}
+  .idoc-grand{border-top:2px solid #1c1c1e;margin-top:6px;padding-top:8px!important;font-size:16px}.idoc-note{color:#444;margin:12px 0 0}.idoc-foot{color:#777;font-size:11px;margin-top:28px;border-top:1px solid #eee;padding-top:10px}
+  @page{size:A4;margin:14mm}@media print{body{padding:0}}`;
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(inv.number || 'Borrador')} · ${esc(inv.buyer?.name || '')}</title><style>${css}</style></head><body>${invoiceDocBody(inv)}</body></html>`;
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(frame);
+  const doc = frame.contentDocument;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(() => {
+    try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch { toast('No se pudo abrir la impresión.', 'error'); }
+    setTimeout(() => frame.remove(), 60000);
+  }, 250);
+}
+function openPayModal(inv) {
+  openSheet({
+    title: `Cobrar ${inv.number}`,
+    subtitle: `Se apuntará un ingreso de ${money(inv.total)} en la cuenta que elijas.`,
+    submitLabel: 'Registrar cobro',
+    body: `<div class="form-grid">
+      <div class="field"><span>Cuenta</span><select name="accountId">${accountOptions(store.data.accounts[0]?.id)}</select></div>
+      <div class="field"><span>Fecha del cobro</span><input name="date" type="date" value="${esc(todayISO())}"></div>
+    </div>`,
+    async onSubmit(fd) {
+      await api('POST', `api/invoices/${inv.id}/pay`, { accountId: fd.get('accountId'), date: fd.get('date') });
+      render();
+      toast('Cobro registrado');
+    }
+  });
+}
+function closeOpenSheets() { for (const d of $$('dialog.sheet[open]')) { d.close(); d.remove(); } }
+
+/* ---------------------------------------------------------------- vista: clientes */
+function viewClientes() {
+  const clients = [...(store.data.clients || [])].sort((a, b) => a.name.localeCompare(b.name));
+  const invs = store.data.invoices || [];
+  return `
+  <div class="viewhead">
+    <div><h1>Clientes</h1><p>Sus datos fiscales se copian en cada factura. El NIF se valida al escribirlo.</p></div>
+    <div class="head-actions"><button class="btn btn-primary" type="button" data-action="new-client">${icon('plus', 16)} Nuevo cliente</button></div>
+  </div>
+  <section class="card">
+    ${clients.length ? `<div class="table-wrap"><table class="report-table doc-table">
+      <thead><tr><th>Cliente</th><th class="hide-m">NIF</th><th class="hide-m">Tipo</th><th>Facturado</th><th>Pendiente</th></tr></thead>
+      <tbody>${clients.map((c) => {
+        const mine = invs.filter((i) => i.clientId === c.id && i.number);
+        return `<tr class="row-link" data-action="edit-client" data-id="${esc(c.id)}" tabindex="0">
+          <td class="cell-text"><b>${esc(c.name)}</b>${c.city ? `<br><span class="muted">${esc(c.city)}</span>` : ''}<span class="cell-sub show-m">${esc(c.nif || 'Sin NIF')}</span></td>
+          <td class="hide-m">${esc(c.nif || '—')}</td><td class="hide-m">${esc(CLIENT_KIND_LABELS[c.kind] || '')}${c.taxMode !== 'normal' ? ` · ${esc(F.TAX_MODES[c.taxMode].label)}` : ''}</td>
+          <td>${esc(money(sum(mine, (i) => invTotals(i).base)))}</td>
+          <td>${esc(money(sum(mine.filter((i) => i.status === 'issued'), (i) => i.total)))}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`
+      : `<div class="empty"><span class="empty-icon">👥</span><h3>Sin clientes todavía</h3><p>Añade a quién facturas. Si es empresa o autónomo, necesitas su NIF.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-client">Nuevo cliente</button></div>`}
+  </section>`;
+}
+function openClientModal(client = null, onSaved = null) {
+  const kind = client?.kind || 'empresa';
+  openSheet({
+    title: client ? 'Editar cliente' : 'Nuevo cliente',
+    subtitle: 'Datos que aparecerán en sus facturas.',
+    submitLabel: client ? 'Guardar' : 'Crear cliente',
+    dangerLabel: client ? 'Eliminar' : '',
+    body: `
+      <div class="field"><span>Tipo de cliente</span><div class="seg seg--full" data-seg="client-kind">${Object.entries(CLIENT_KIND_LABELS).map(([k, l]) => `<button type="button" data-value="${k}" class="${kind === k ? 'active' : ''}">${l}</button>`).join('')}</div><input type="hidden" name="kind" value="${kind}"></div>
+      <div class="form-grid">
+        <div class="field"><span>Nombre o razón social</span><input name="name" maxlength="120" value="${esc(client?.name || '')}" required></div>
+        <div class="field"><span>NIF / CIF / NIE <span class="hint" data-nif-opt${kind === 'particular' ? '' : ' hidden'}>(opcional)</span></span><input name="nif" maxlength="20" value="${esc(client?.nif || '')}" data-nif autocapitalize="characters"><small class="nif-hint">${nifHint(client?.nif)}</small></div>
+      </div>
+      <div class="field"><span>Dirección</span><input name="address" maxlength="160" value="${esc(client?.address || '')}"></div>
+      <div class="form-grid form-grid--3">
+        <div class="field"><span>C. postal</span><input name="zip" maxlength="10" value="${esc(client?.zip || '')}"></div>
+        <div class="field"><span>Localidad</span><input name="city" maxlength="80" value="${esc(client?.city || '')}"></div>
+        <div class="field"><span>País</span><input name="country" maxlength="40" value="${esc(client?.country || 'España')}"></div>
+      </div>
+      <div class="form-grid">
+        <div class="field"><span>Email <span class="hint">(opcional)</span></span><input name="email" type="email" maxlength="120" value="${esc(client?.email || '')}"></div>
+        <div class="field"><span>Operación habitual</span><select name="taxMode">${Object.entries(F.TAX_MODES).map(([k, m]) => `<option value="${k}"${(client?.taxMode || 'normal') === k ? ' selected' : ''}>${esc(m.label)}</option>`).join('')}</select></div>
+      </div>
+      <div class="form-grid">
+        <div class="field"><span>Retención por defecto</span><select name="irpfRate"><option value="">Automática según tu perfil</option>${F.IRPF_OPTIONS.map((o) => `<option value="${o.value}"${client?.irpfRate === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></div>
+        <label class="checkbox" style="align-self:end;padding-bottom:12px"><input type="checkbox" name="recargo"${client?.recargo ? ' checked' : ''}> Recargo de equivalencia</label>
+      </div>
+      <p class="tiny">Empresas y autónomos: con actividad profesional se aplica tu retención (15 % o 7 %). A particulares no se les retiene.</p>`,
+    onMount(dialog) {
+      const seg = dialog.querySelector('[data-seg="client-kind"]');
+      seg.addEventListener('click', (e) => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        seg.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+        dialog.querySelector('input[name="kind"]').value = b.dataset.value;
+        dialog.querySelector('[data-nif-opt]').hidden = b.dataset.value !== 'particular';
+      });
+    },
+    async onSubmit(fd) {
+      const body = Object.fromEntries(['kind', 'name', 'nif', 'address', 'zip', 'city', 'country', 'email', 'taxMode', 'irpfRate'].map((k) => [k, fd.get(k)]));
+      body.recargo = fd.get('recargo') === 'on';
+      if (body.kind !== 'particular' && !body.nif) throw new Error('Para empresas y autónomos el NIF es obligatorio en la factura.');
+      const res = client ? await api('PATCH', `api/clients/${client.id}`, body) : await api('POST', 'api/clients', body);
+      render();
+      toast(client ? 'Cliente guardado' : 'Cliente creado');
+      onSaved?.(byId(store.data.clients, client?.id || res.createdId));
+    },
+    async onDanger(dialog) {
+      const ok = await confirmDialog({ title: 'Eliminar cliente', message: 'Solo se puede eliminar si no tiene facturas emitidas.' });
+      if (!ok) return;
+      await api('DELETE', `api/clients/${client.id}`);
+      dialog.close();
+      render();
+      toast('Cliente eliminado');
+    }
+  });
+}
+
+/* ---------------------------------------------------------------- vista: gastos del negocio */
+function viewGastos() {
+  const cur = currentQuarter();
+  const sel = ui.gastosQ || 'q';
+  const { start, end } = sel === 'y' ? { start: `${cur.year}-01-01`, end: `${cur.year}-12-31` } : F.quarterRange(cur.year, cur.q);
+  const all = [...(store.data.purchases || [])].sort((a, b) => b.date.localeCompare(a.date));
+  const list = sel === 'all' ? all : all.filter((p) => p.date >= start && p.date <= end);
+  const tot = list.map((p) => F.purchaseTotals(p));
+  return `
+  <div class="viewhead">
+    <div><h1>Gastos del negocio</h1><p>Las facturas que recibes. Restan IVA en el 303 y rendimiento en el 130.</p></div>
+    <div class="head-actions"><button class="btn btn-primary" type="button" data-action="new-purchase">${icon('plus', 16)} Nuevo gasto</button></div>
+  </div>
+  <div class="statgrid">
+    ${statCard('Gasto deducible', bigMoney(round(sum(tot, (t) => t.gastoDeducible))), '<span>Resta en tu IRPF</span>', 'expense', 'receipt')}
+    ${statCard('IVA soportado deducible', bigMoney(round(sum(tot, (t) => t.ivaDeducible))), '<span>Resta en tu IVA</span>', 'income', 'percent')}
+    ${statCard('Facturas recibidas', `<span class="fig-int">${list.length}</span>`, `<span>${sel === 'q' ? quarterLabel(cur.year, cur.q) : sel === 'y' ? `Año ${cur.year}` : 'Todas'}</span>`, 'net', 'list')}
+  </div>
+  <section class="card">
+    <div class="card-head">
+      <div class="seg" role="group" aria-label="Periodo">${[['q', 'Este trimestre'], ['y', 'Este año'], ['all', 'Todos']].map(([k, l]) => `<button type="button" data-action="gastos-period" data-value="${k}" class="${sel === k ? 'active' : ''}">${l}</button>`).join('')}</div>
+    </div>
+    ${list.length ? `<div class="table-wrap"><table class="report-table doc-table">
+      <thead><tr><th class="hide-m">Fecha</th><th>Proveedor</th><th class="hide-m">Tipo</th><th class="hide-m">Base</th><th>IVA deducible</th><th>Total</th></tr></thead>
+      <tbody>${list.map((p, i) => `<tr class="row-link" data-action="edit-purchase" data-id="${esc(p.id)}" tabindex="0">
+        <td class="hide-m">${esc(fmtDate(p.date))}</td><td class="cell-text"><b>${esc(p.supplier)}</b>${p.concept ? `<br><span class="muted">${esc(p.concept)}</span>` : ''}<span class="cell-sub show-m">${esc(fmtDate(p.date))}</span></td>
+        <td class="cell-text hide-m">${esc(PURCHASE_KIND_INFO[p.kind]?.label || p.kind)}${tot[i].pct < 100 ? ` · ${tot[i].pct} %` : ''}</td>
+        <td class="hide-m">${esc(money(tot[i].base))}</td><td>${esc(money(tot[i].ivaDeducible))}</td><td><b>${esc(money(tot[i].total))}</b></td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty"><span class="empty-icon">🧾</span><h3>Sin gastos en este periodo</h3><p>Apunta las facturas de proveedores, tu cuota de autónomos, la gestoría o el móvil: todo lo que sea deducible.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-purchase">Nuevo gasto</button></div>`}
+  </section>
+  <p class="tiny legal-note">Para que un gasto sea deducible debe estar vinculado a la actividad, justificado con factura a tu nombre y registrado. Ante la duda, pregunta a tu asesor.</p>`;
+}
+function purchaseTotalsHTML(p) {
+  const t = F.purchaseTotals(p);
+  return `<div class="op-total"><span>Total pagado</span><b>${esc(money(t.total))}</b><small>IVA deducible ${esc(money(t.ivaDeducible))} · gasto deducible en IRPF ${esc(money(t.gastoDeducible))}${t.irpf ? ` · retención que ingresas ${esc(money(t.irpf))}` : ''}</small></div>`;
+}
+function openPurchaseModal(p = null, preset = {}) {
+  const src = { ...preset, ...(p || {}) };
+  const kind = src.kind || 'otros';
+  const info = PURCHASE_KIND_INFO[kind];
+  const linked = p ? Boolean(p.transactionId) : true;
+  openSheet({
+    title: p ? 'Editar gasto' : 'Nuevo gasto del negocio',
+    subtitle: 'Copia los datos de la factura que te han dado.',
+    submitLabel: p ? 'Guardar' : 'Añadir gasto',
+    dangerLabel: p ? 'Eliminar' : '',
+    body: `
+      <div class="form-grid">
+        <div class="field"><span>Tipo de gasto</span><select name="kind" data-p-kind>${Object.entries(PURCHASE_KIND_INFO).map(([k, x]) => `<option value="${k}"${kind === k ? ' selected' : ''}>${esc(x.label)}</option>`).join('')}</select></div>
+        <div class="field"><span>Fecha de la factura</span><input name="date" type="date" value="${esc(src.date || todayISO())}"></div>
+      </div>
+      <p class="tiny" data-p-hint${info.hint ? '' : ' hidden'}>${esc(info.hint || '')}</p>
+      <div class="form-grid">
+        <div class="field"><span>Proveedor</span><input name="supplier" maxlength="120" value="${esc(src.supplier || '')}" placeholder="Ej. Movistar"></div>
+        <div class="field"><span>NIF del proveedor <span class="hint">(opcional)</span></span><input name="supplierNif" maxlength="20" value="${esc(src.supplierNif || '')}" data-nif><small class="nif-hint">${nifHint(src.supplierNif)}</small></div>
+      </div>
+      <div class="form-grid">
+        <div class="field"><span>Concepto <span class="hint">(opcional)</span></span><input name="concept" maxlength="200" value="${esc(src.concept || '')}"></div>
+        <div class="field"><span>Nº de factura <span class="hint">(opcional)</span></span><input name="number" maxlength="40" value="${esc(src.number || '')}"></div>
+      </div>
+      <div class="form-grid form-grid--3">
+        <div class="field"><span>Base imponible</span><input name="base" type="number" min="0" step="0.01" inputmode="decimal" value="${src.base !== undefined ? esc(src.base) : ''}" placeholder="0,00" required></div>
+        <div class="field" data-p-iva${info.noIva ? ' hidden' : ''}><span>IVA</span><select name="ivaRate">${F.IVA_RATES.map((r) => `<option value="${r}"${Number(src.ivaRate ?? 21) === r ? ' selected' : ''}>${r} %</option>`).join('')}</select></div>
+        <div class="field"><span>% afecto a la actividad</span><input name="deductiblePct" type="number" min="0" max="100" step="1" value="${esc(src.deductiblePct ?? info.pct)}"></div>
+      </div>
+      <details class="howto"><summary>Más opciones</summary>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><span>Cuota de IVA exacta <span class="hint">(si no cuadra)</span></span><input name="ivaAmount" type="number" step="0.01" value="${src.ivaAmount ?? ''}"></div>
+          <div class="field"><span>Retención que practicas</span><select name="irpfRate">${[0, 15, 7, 19].map((v) => `<option value="${v}"${Number(src.irpfRate ?? info.irpf ?? 0) === v ? ' selected' : ''}>${v ? `${v} %` : 'Ninguna'}</option>`).join('')}</select></div>
+        </div>
+        <label class="checkbox" style="margin-top:10px"><input type="checkbox" name="ivaNoDeducible"${src.ivaNoDeducible ? ' checked' : ''}> El IVA no es deducible (ej. tique sin datos fiscales, comidas)</label>
+      </details>
+      <div class="form-grid">
+        <div class="field"><span>Pagado desde</span><select name="accountId"><option value="">No apuntar en mis cuentas</option>${store.data.accounts.map((a) => `<option value="${esc(a.id)}"${(p ? p.accountId === a.id : linked && a.id === store.data.accounts[0]?.id) ? ' selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>
+        <div data-p-total>${purchaseTotalsHTML(src)}</div>
+      </div>`,
+    onMount(dialog, form) {
+      const read = () => {
+        const fd = new FormData(form);
+        return { kind: fd.get('kind'), base: Number(fd.get('base')) || 0, ivaRate: PURCHASE_KIND_INFO[fd.get('kind')]?.noIva ? 0 : Number(fd.get('ivaRate')), ivaAmount: fd.get('ivaAmount'), deductiblePct: Number(fd.get('deductiblePct')), irpfRate: Number(fd.get('irpfRate')), ivaNoDeducible: fd.get('ivaNoDeducible') === 'on' };
+      };
+      const update = () => { dialog.querySelector('[data-p-total]').innerHTML = purchaseTotalsHTML(read()); };
+      dialog.querySelector('[data-p-kind]').addEventListener('change', (e) => {
+        const x = PURCHASE_KIND_INFO[e.target.value];
+        const hint = dialog.querySelector('[data-p-hint]');
+        hint.hidden = !x.hint; hint.textContent = x.hint || '';
+        dialog.querySelector('[data-p-iva]').hidden = Boolean(x.noIva);
+        form.deductiblePct.value = x.pct;
+        form.irpfRate.value = String(x.irpf || 0);
+        if (e.target.value === 'reta' && !form.supplier.value) form.supplier.value = 'Seguridad Social (RETA)';
+        if (e.target.value === 'reta' && !form.base.value && retaMonthlyNow()) form.base.value = retaMonthlyNow();
+        update();
+      });
+      form.addEventListener('input', update);
+      form.addEventListener('change', update);
+    },
+    async onSubmit(fd) {
+      const body = Object.fromEntries(['kind', 'date', 'supplier', 'supplierNif', 'concept', 'number', 'base', 'ivaRate', 'deductiblePct', 'ivaAmount', 'irpfRate', 'accountId'].map((k) => [k, fd.get(k)]));
+      body.ivaNoDeducible = fd.get('ivaNoDeducible') === 'on';
+      if (p) await api('PATCH', `api/purchases/${p.id}`, body);
+      else await api('POST', 'api/purchases', body);
+      render();
+      toast(p ? 'Gasto guardado' : 'Gasto añadido');
+    },
+    async onDanger(dialog) {
+      const ok = await confirmDialog({ title: 'Eliminar gasto', message: 'También se borrará el movimiento asociado en tus cuentas.' });
+      if (!ok) return;
+      await api('DELETE', `api/purchases/${p.id}`);
+      dialog.close();
+      render();
+      toast('Gasto eliminado');
+    }
+  });
+}
+
+/* ---------------------------------------------------------------- vista: impuestos */
+function viewImpuestos() {
+  const def = quarterToFile();
+  const year = ui.taxYear || def.year;
+  const q = ui.taxQ || def.q;
+  const { m303, m130, exento130 } = hacienda(year, q);
+  const deadlines = F.upcomingDeadlines(todayISO(), { count: 5 });
+  const d = F.quarterDeadline(year, q);
+  const left = daysUntil(d.to);
+  const fm = (n) => esc(money(n));
+  const years = [...new Set([currentQuarter().year, currentQuarter().year - 1, ...(store.data.invoices || []).map((i) => Number(i.date.slice(0, 4)))])].sort((a, b) => b - a);
+  const notice = territoryNotice(biz().territory);
+  const res303 = m303.resultado;
+  const casillasRate = { 4: ['01', '03'], 10: ['04', '06'], 21: ['07', '09'] };
+  return `
+  <div class="viewhead">
+    <div><h1>Impuestos</h1><p>Tus modelos trimestrales calculados con tus facturas y gastos. Cópialos en la sede de la Agencia Tributaria.</p></div>
+    <div class="head-actions">
+      <select class="select select--sm" id="taxYear" aria-label="Año">${years.map((y) => `<option value="${y}"${y === year ? ' selected' : ''}>${y}</option>`).join('')}</select>
+      <div class="seg" role="group" aria-label="Trimestre">${[1, 2, 3, 4].map((k) => `<button type="button" data-action="tax-q" data-value="${k}" class="${k === q ? 'active' : ''}">${k}T</button>`).join('')}</div>
+    </div>
+  </div>
+  ${notice ? `<div class="banner">${icon('alert', 17)}<span>${esc(notice)}</span></div>` : ''}
+  <div class="banner ${left >= 0 && left <= 15 ? 'banner--warn' : ''}">${icon('calendar', 17)}<span><b>${quarterLabel(year, q)}:</b> se presenta ${esc(deadlineText(year, q))}${left >= 0 ? ` · quedan ${left} días` : ' · plazo cerrado'}. Si domicilias el pago, el plazo acaba 5 días antes.</span></div>
+  <div class="statgrid">
+    ${statCard('IVA · modelo 303', bigMoney(Math.abs(res303)), `<span>${res303 >= 0 ? 'A ingresar' : q === 4 ? 'A devolver o compensar' : 'A compensar en el siguiente'}</span>`, res303 > 0 ? 'expense' : 'income', 'percent')}
+    ${statCard('IRPF · modelo 130', bigMoney(exento130 ? 0 : m130.resultado), `<span>${exento130 ? 'Probablemente no lo presentes (ver nota)' : m130.bruto < 0 ? 'Sale negativo: se presenta a cero' : 'A ingresar'}</span>`, 'expense', 'invoice')}
+    ${statCard('Total a apartar', bigMoney(Math.max(0, res303) + (exento130 ? 0 : m130.resultado)), '<span>Guárdalo aparte para no llevarte sustos</span>', 'net', 'shield')}
+  </div>
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head"><div><h2>Modelo 303 · IVA</h2><p>${m303.invoices} facturas emitidas · ${m303.purchases} gastos</p></div></div>
+      <div class="table-wrap"><table class="report-table tax-table">
+        <thead><tr><th>Concepto</th><th>Casilla</th><th>Base</th><th>Cuota</th></tr></thead>
+        <tbody>
+          ${m303.repercutido.length ? m303.repercutido.map((r) => `<tr><td>IVA repercutido ${r.rate} %</td><td>${casillasRate[r.rate] ? casillasRate[r.rate].join(' / ') : '—'}</td><td>${fm(r.base)}</td><td>${fm(r.cuota)}</td></tr>`).join('') : '<tr><td>IVA repercutido</td><td>—</td><td>—</td><td>0</td></tr>'}
+          ${m303.recargo ? `<tr><td>Recargo de equivalencia</td><td>—</td><td></td><td>${fm(m303.recargo)}</td></tr>` : ''}
+          <tr class="row-sub"><td>Total devengado</td><td>27</td><td></td><td>${fm(m303.devengado)}</td></tr>
+          <tr><td>IVA soportado deducible</td><td>28 / 29</td><td>${fm(m303.baseSoportado)}</td><td>−${fm(m303.soportado)}</td></tr>
+          <tr class="row-total"><td>Resultado</td><td>46</td><td></td><td>${fm(m303.resultado)}</td></tr>
+          ${m303.baseNoSujeta ? `<tr><td>Operaciones sin IVA español (UE, exportación, exentas, ISP)</td><td>—</td><td>${fm(m303.baseNoSujeta)}</td><td></td></tr>` : ''}
+        </tbody></table></div>
+      ${q === 4 ? '<p class="tiny">En enero también presentas el resumen anual de IVA (modelo 390), con los totales de los cuatro trimestres.</p>' : ''}
+      ${m303.baseNoSujeta ? '<p class="tiny">Si facturas a empresas de la UE, también presentas el modelo 349 (declaración recapitulativa).</p>' : ''}
+    </section>
+    <section class="card">
+      <div class="card-head"><div><h2>Modelo 130 · IRPF</h2><p>Acumulado del 1 de enero al ${esc(fmtDate(m130.end))}</p></div></div>
+      <div class="table-wrap"><table class="report-table tax-table">
+        <thead><tr><th>Concepto</th><th>Casilla</th><th>Importe</th></tr></thead>
+        <tbody>
+          <tr><td>Ingresos (base de tus facturas)</td><td>01</td><td>${fm(m130.ingresos)}</td></tr>
+          <tr><td>Gastos deducibles${m130.retaAuto ? ` <span class="muted">(incluye ${fm(m130.retaAuto)} de cuota de autónomos)</span>` : ''}</td><td>02</td><td>${fm(m130.gastos + m130.dificil)}</td></tr>
+          ${m130.dificil ? `<tr class="row-note"><td colspan="2">· de ellos, 5 % gastos de difícil justificación (máx. 2.000 €/año)</td><td>${fm(m130.dificil)}</td></tr>` : ''}
+          <tr class="row-sub"><td>Rendimiento neto</td><td>03</td><td>${fm(m130.rendimiento)}</td></tr>
+          <tr><td>20 % del rendimiento</td><td>04</td><td>${fm(m130.cuota20)}</td></tr>
+          <tr><td>Pagos de trimestres anteriores</td><td>05</td><td>${m130.anteriores ? '−' : ''}${fm(m130.anteriores)}</td></tr>
+          <tr><td>Retenciones que te han hecho</td><td>06</td><td>${m130.retenciones ? '−' : ''}${fm(m130.retenciones)}</td></tr>
+          <tr class="row-total"><td>Resultado</td><td>07</td><td>${fm(m130.bruto)}</td></tr>
+        </tbody></table></div>
+      ${exento130 ? `<p class="tiny tax-hint">${icon('check', 13)} El ${esc(percent(m130.pctRetencion, 0))} de tus ingresos ya lleva retención. Si en el año anterior más del 70 % de tus ingresos profesionales tuvieron retención, no estás obligado a presentar el 130 (art. 109 del Reglamento del IRPF).</p>` : ''}
+    </section>
+  </div>
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head"><div><h2>Calendario fiscal</h2><p>Tus próximos plazos con Hacienda</p></div></div>
+      <div class="deadlines">${deadlines.map((x) => {
+        const n = daysUntil(x.to);
+        const open = todayISO() >= x.from;
+        return `<div class="deadline${open ? ' is-open' : ''}"><div class="deadline-date"><b>${esc(fmtDate(x.to).slice(0, 5))}</b><span>${esc(x.to.slice(0, 4))}</span></div>
+          <div class="deadline-text"><b>${esc(x.title)}</b><span>${open ? `Plazo abierto · quedan ${n} días` : `Del ${esc(fmtDate(x.from))} al ${esc(fmtDate(x.to))}`}. ${esc(x.detail)}</span></div></div>`;
+      }).join('')}</div>
+    </section>
+    <section class="card">
+      <div class="card-head"><div><h2>Verifactu y factura electrónica</h2><p>Lo que viene en la facturación</p></div></div>
+      <p class="card-text">La ley antifraude obliga a que los programas de facturación sean sistemas Verifactu, con huella encadenada y un código QR en cada factura. Según el Real Decreto-ley 15/2025, sería obligatorio para autónomos a partir del 1 de julio de 2027, y Hacienda ha anunciado que lo retrasará hasta octubre de 2028 (pendiente de publicarse en el BOE).</p>
+      <p class="card-text">Mi Cartera numera de forma correlativa y no permite modificar ni borrar facturas emitidas, pero <b>todavía no es un sistema Verifactu certificado</b>. Antes de que sea obligatorio lo actualizaremos o te avisaremos.</p>
+    </section>
+  </div>
+  <p class="tiny legal-note">Cálculos orientativos para estimación directa simplificada en territorio común. No sustituyen a un asesor fiscal ni a la presentación oficial en la sede de la Agencia Tributaria.</p>`;
+}
+
+/* ---------------------------------------------------------------- vista: cuota de autónomos */
+function retaYearData() {
+  const today = todayISO();
+  const year = Number(today.slice(0, 4));
+  const start = `${year}-01-01`;
+  const invs = (store.data.invoices || []).filter((i) => i.number && i.date >= start && i.date <= today);
+  const ingresos = round(sum(invs, (i) => invTotals(i).base));
+  const purchases = (store.data.purchases || []).filter((p) => p.date >= start && p.date <= today);
+  let gastos = round(sum(purchases, (p) => F.purchaseTotals(p).gastoDeducible));
+  const hasReta = purchases.some((p) => p.kind === 'reta');
+  const month = Number(today.slice(5, 7));
+  const b = biz();
+  const fromMonth = b.startDate && b.startDate.slice(0, 4) === String(year) ? Number(b.startDate.slice(5, 7)) : 1;
+  const months = Math.max(1, month - fromMonth + 1);
+  if (!hasReta && retaMonthlyNow()) gastos = round(gastos + retaMonthlyNow() * months);
+  const factor = (13 - fromMonth) / months;
+  return { year, ingresos, gastos, months, annualIng: round(ingresos * factor), annualGas: round(gastos * factor) };
+}
+function retaResultHTML(ing, gas) {
+  const b = biz();
+  const today = todayISO();
+  const comp = F.retaComputable(ing, gas, b.societario);
+  const tr = F.retaTramo(comp.mensual);
+  const monthsAlta = F.monthsSince(b.startDate, today);
+  const flat = b.tarifaPlana && monthsAlta < 24;
+  const flatYear2 = b.tarifaPlana && monthsAlta >= 12 && monthsAlta < 24;
+  const current = retaMonthlyNow();
+  const due = tr.cuotaMin;
+  const diff = current ? round((due - current) * 12) : 0;
+  const nb = F.nextBaseChange(today);
+  const fm = (n, dec = 2) => esc(money(n, { decimals: dec }));
+  return `
+    <div class="statgrid">
+      ${statCard('Rendimiento neto mensual', bigMoney(comp.mensual), `<span>Tras restar el ${Math.round(comp.generic * 100)} % de gastos genéricos</span>`, 'income', 'trend')}
+      ${statCard('Tu tramo', `<span class="fig-int">${esc(tr.tramo)}</span>`, `<span>${tr.min ? `de ${fm(tr.min, 0)}` : 'hasta'} ${Number.isFinite(tr.max) ? `${tr.min ? 'a ' : ''}${fm(tr.max, 0)}` : 'en adelante'} al mes</span>`, 'net', 'chart')}
+      ${statCard(flat && monthsAlta < 12 ? 'Cuota con tarifa plana' : 'Cuota mínima de tu tramo', bigMoney(flat && monthsAlta < 12 ? F.RETA_TARIFA_PLANA_MEI : due), `<span>${flat && monthsAlta < 12 ? `80 € + MEI · quedan ${12 - monthsAlta} meses` : `Base mínima ${fm(tr.baseMin)} × 31,5 %`}</span>`, 'expense', 'shield')}
+    </div>
+    ${flatYear2 ? `<div class="banner ${comp.anual < F.SMI_ANUAL ? '' : 'banner--warn'}">${icon('alert', 17)}<span>${comp.anual < F.SMI_ANUAL ? `<b>Puedes pedir la prórroga de la tarifa plana</b> otros 12 meses: tu rendimiento previsto (${fm(comp.anual, 0)}) está por debajo del salario mínimo (${fm(F.SMI_ANUAL, 0)} al año). Solicítala antes de que acabe el primer año.` : `<b>No podrás prorrogar la tarifa plana:</b> tu rendimiento previsto supera el salario mínimo anual (${fm(F.SMI_ANUAL, 0)}).`}</span></div>` : ''}
+    ${current && !(flat && monthsAlta < 12) ? `<div class="banner ${diff > 0 ? 'banner--warn' : ''}">${icon(diff > 0 ? 'alert' : 'check', 17)}<span>${diff > 0
+      ? `Pagas ${fm(current)} al mes pero te correspondería al menos ${fm(due)}. Si no cambias tu base, en la regularización te podrían reclamar unos <b>${fm(diff, 0)}</b>. Pide el cambio antes del ${esc(fmtDate(nb.requestBy))} (efecto ${esc(fmtDate(nb.effective))}).`
+      : diff < -50 ? `Pagas ${fm(current)} al mes y la mínima de tu tramo es ${fm(due)}. Si tus ingresos se confirman, la Seguridad Social te devolvería unos <b>${fm(-diff, 0)}</b> o puedes bajar tu base antes del ${esc(fmtDate(nb.requestBy))}.`
+      : `Tu cuota actual (${fm(current)}) encaja con tu tramo previsto.`}</span></div>` : ''}
+  `;
+}
+function viewCuota() {
+  const data = retaYearData();
+  const ing = ui.retaIng ?? data.annualIng;
+  const gas = ui.retaGas ?? data.annualGas;
+  const tr = F.retaTramo(F.retaComputable(ing, gas, biz().societario).mensual);
+  const nb = F.nextBaseChange(todayISO());
+  return `
+  <div class="viewhead">
+    <div><h1>Cuota de autónomos</h1><p>Desde 2023 pagas según tus rendimientos reales. Calcula tu tramo de ${data.year} y evita sorpresas en la regularización.</p></div>
+    <div class="head-actions"><button class="btn btn-ghost" type="button" data-action="edit-business">${icon('settings', 16)} Mi cuota actual</button></div>
+  </div>
+  <section class="card">
+    <div class="card-head"><div><h2>Previsión del año</h2><p>Rellenado con tus facturas y gastos (${data.months} mes${data.months === 1 ? '' : 'es'}) proyectados a 12 meses. Ajústalo si lo prevés distinto.</p></div></div>
+    <div class="form-grid reta-inputs">
+      <div class="field"><span>Ingresos previstos del año (sin IVA)</span><input type="number" min="0" step="100" inputmode="decimal" value="${esc(Math.round(ing))}" data-reta="ing"></div>
+      <div class="field"><span>Gastos deducibles previstos (incluida la cuota)</span><input type="number" min="0" step="100" inputmode="decimal" value="${esc(Math.round(gas))}" data-reta="gas"></div>
+    </div>
+  </section>
+  <div id="retaResult">${retaResultHTML(ing, gas)}</div>
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head"><div><h2>Tabla de tramos ${data.year}</h2><p>Cuota mínima mensual de cada tramo (31,5 % de la base)</p></div></div>
+      <div class="table-wrap"><table class="report-table tax-table" id="retaTable">
+        <thead><tr><th>Rendimiento mensual</th><th>Base mínima</th><th>Cuota mínima</th></tr></thead>
+        <tbody>${F.RETA_TABLE.map((t) => `<tr class="${t === tr ? 'is-current' : ''}" data-tramo="${esc(t.tramo)}"><td>${t.min ? esc(money(t.min, { decimals: 0 })) : '0 €'} – ${Number.isFinite(t.max) ? esc(money(t.max, { decimals: 0 })) : 'más'}</td><td>${esc(money(t.baseMin))}</td><td>${esc(money(t.cuotaMin))}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><div><h2>Cómo funciona</h2><p>Lo esencial del sistema de cotización</p></div></div>
+      <ol class="steps">
+        <li>Eliges una base según los ingresos que prevés. Puedes cambiarla <b>6 veces al año</b>: si lo pides antes del ${esc(fmtDate(nb.requestBy))}, se aplica desde el ${esc(fmtDate(nb.effective))}.</li>
+        <li>Rendimiento computable = ingresos − gastos deducibles − ${biz().societario ? '3 % (societarios)' : '7 % de gastos genéricos'}. Se divide entre 12.</li>
+        <li>Al año siguiente, la Seguridad Social compara con tu declaración de la renta y te reclama o devuelve la diferencia.</li>
+        <li>Nuevos autónomos: tarifa plana de 80 € al mes (88,64 € con el MEI) durante 12 meses, prorrogable otros 12 si ganas menos del salario mínimo.</li>
+      </ol>
+      <p class="tiny">Tablas de la Orden PJC/297/2026 (cuotas de 2025 congeladas para 2026). Orientativo: confirma tu caso en Import@ss.</p>
+    </section>
+  </div>`;
+}
+function updateRetaResult() {
+  const host = document.getElementById('retaResult');
+  if (!host) return;
+  const data = retaYearData();
+  const ing = ui.retaIng ?? data.annualIng;
+  const gas = ui.retaGas ?? data.annualGas;
+  host.innerHTML = retaResultHTML(ing, gas);
+  const tr = F.retaTramo(F.retaComputable(ing, gas, biz().societario).mensual);
+  for (const row of $$('#retaTable tbody tr')) row.classList.toggle('is-current', row.dataset.tramo === tr.tramo);
+}
+
+/* ---------------------------------------------------------------- ajustes: perfil, secciones y negocio */
+function settingsProfileHTML() {
+  const s = settings();
+  const mods = s.modules || {};
+  const b = biz();
+  return `<section class="card setting-card">
+      <h2>Perfil y secciones</h2>
+      <p>Muestra solo lo que usas. Ocultar una sección no borra sus datos.</p>
+      <div class="setting-row">
+        <div><h3>Uso la app como</h3><p>Cambia el menú y el resumen.</p></div>
+        <div class="seg" role="group" aria-label="Perfil">${Object.entries(PROFILE_LABELS).map(([k, p]) => `<button type="button" data-action="set-profile" data-value="${k}" class="${(s.profile || 'personal') === k ? 'active' : ''}">${k === 'ambos' ? 'Ambos' : esc(p.title)}</button>`).join('')}</div>
+      </div>
+      <div class="module-toggles">${Object.entries(MODULE_INFO).map(([k, m]) => `<label class="checkbox"><input type="checkbox" data-module-toggle="${k}"${mods[k] ? ' checked' : ''}> ${esc(m.title)}</label>`).join('')}</div>
+      <div class="setting-row">
+        <div><h3>Guía de bienvenida</h3><p>Vuelve a ver la configuración inicial.</p></div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="restart-onboarding">${icon('sparkles', 14)} Repetir</button>
+      </div>
+    </section>
+    ${hasBusiness() ? `<section class="card setting-card">
+      <h2>Mi negocio</h2>
+      <p>Datos fiscales de tus facturas y de los cálculos de impuestos.</p>
+      <div class="setting-row">
+        <div><h3>${esc(b.name || 'Sin nombre')}</h3><p>${b.nif ? `NIF ${esc(b.nif)}` : 'Falta el NIF'} · ${b.activity === 'empresarial' ? 'Actividad empresarial' : 'Actividad profesional'} · retención ${esc(b.irpfRate ?? 15)} %</p></div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="edit-business">${icon('edit', 14)} Editar</button>
+      </div>
+      <div class="setting-row">
+        <div><h3>Numeración</h3><p>Serie ${esc(b.series || 'F')} para facturas y ${esc(b.seriesR || 'R')} para rectificativas, reiniciada cada año.</p></div>
+      </div>
+      <div class="setting-row">
+        <div><h3>Cuota de autónomos</h3><p>${b.retaMonthly ? `${esc(money(b.retaMonthly))} al mes` : 'No indicada'}${b.tarifaPlana ? ' · tarifa plana' : ''}</p></div>
+      </div>
+    </section>` : ''}`;
+}
+function openBusinessModal() {
+  const b = biz();
+  openSheet({
+    title: 'Mi negocio',
+    subtitle: 'Estos datos aparecen en tus facturas. Cambiarlos no altera las ya emitidas.',
+    wide: true,
+    submitLabel: 'Guardar',
+    body: `
+      <div class="form-grid">
+        <div class="field"><span>Nombre y apellidos o razón social</span><input name="name" maxlength="120" value="${esc(b.name || '')}"></div>
+        <div class="field"><span>NIF / NIE</span><input name="nif" maxlength="20" value="${esc(b.nif || '')}" data-nif><small class="nif-hint">${nifHint(b.nif)}</small></div>
+      </div>
+      <div class="form-grid">
+        <div class="field"><span>Nombre comercial <span class="hint">(opcional)</span></span><input name="tradeName" maxlength="120" value="${esc(b.tradeName || '')}"></div>
+        <div class="field"><span>Email y teléfono <span class="hint">(opcional)</span></span><div class="form-grid"><input name="email" type="email" maxlength="120" value="${esc(b.email || '')}" placeholder="Email"><input name="phone" maxlength="30" value="${esc(b.phone || '')}" placeholder="Teléfono"></div></div>
+      </div>
+      <div class="field"><span>Dirección fiscal</span><input name="address" maxlength="160" value="${esc(b.address || '')}"></div>
+      <div class="form-grid form-grid--3">
+        <div class="field"><span>C. postal</span><input name="zip" maxlength="10" value="${esc(b.zip || '')}"></div>
+        <div class="field"><span>Localidad</span><input name="city" maxlength="80" value="${esc(b.city || '')}"></div>
+        <div class="field"><span>Provincia</span><input name="province" maxlength="80" value="${esc(b.province || '')}"></div>
+      </div>
+      <div class="form-grid form-grid--3">
+        <div class="field"><span>Actividad</span><select name="activity"><option value="profesional"${b.activity !== 'empresarial' ? ' selected' : ''}>Profesional</option><option value="empresarial"${b.activity === 'empresarial' ? ' selected' : ''}>Empresarial</option></select></div>
+        <div class="field"><span>Epígrafe IAE <span class="hint">(opcional)</span></span><input name="iae" maxlength="20" value="${esc(b.iae || '')}"></div>
+        <div class="field"><span>Fecha de alta</span><input name="startDate" type="date" value="${esc(b.startDate || '')}"></div>
+      </div>
+      <div class="form-grid form-grid--3">
+        <div class="field"><span>IVA habitual</span><select name="ivaRate">${F.IVA_RATES.map((r) => `<option value="${r}"${Number(b.ivaRate ?? 21) === r ? ' selected' : ''}>${r} %</option>`).join('')}</select></div>
+        <div class="field"><span>Tu retención</span><select name="irpfRate">${F.IRPF_OPTIONS.map((o) => `<option value="${o.value}"${Number(b.irpfRate ?? 15) === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></div>
+        <div class="field"><span>Días para cobrar</span><input name="paymentDays" type="number" min="0" max="120" value="${esc(b.paymentDays ?? 30)}"></div>
+      </div>
+      <div class="form-grid form-grid--3">
+        <div class="field"><span>Cuota de autónomos mensual</span><input name="retaMonthly" type="number" min="0" step="0.01" value="${esc(b.retaMonthly || '')}" placeholder="Ej. 294,00"></div>
+        <div class="field"><span>Territorio</span><select name="territory">
+          ${[['comun', 'Península y Baleares'], ['canarias', 'Canarias (IGIC)'], ['ceutamelilla', 'Ceuta o Melilla (IPSI)'], ['foral', 'País Vasco o Navarra']].map(([k, l]) => `<option value="${k}"${(b.territory || 'comun') === k ? ' selected' : ''}>${l}</option>`).join('')}
+        </select></div>
+        <div class="field"><span>Series</span><div class="form-grid"><input name="series" maxlength="6" value="${esc(b.series || 'F')}" aria-label="Serie ordinaria"><input name="seriesR" maxlength="6" value="${esc(b.seriesR || 'R')}" aria-label="Serie rectificativas"></div></div>
+      </div>
+      <label class="checkbox"><input type="checkbox" name="tarifaPlana"${b.tarifaPlana ? ' checked' : ''}> Tengo la tarifa plana de nuevos autónomos</label>
+      <label class="checkbox"><input type="checkbox" name="societario"${b.societario ? ' checked' : ''}> Soy autónomo societario (administrador de mi sociedad)</label>
+      <div class="field"><span>IBAN para cobros <span class="hint">(aparece en la factura)</span></span><input name="iban" maxlength="40" value="${esc(b.iban || '')}" placeholder="ES00 0000 0000 0000 0000 0000"></div>
+      <div class="field"><span>Pie de factura <span class="hint">(opcional)</span></span><input name="footer" maxlength="300" value="${esc(b.footer || '')}" placeholder="Ej. Inscrito en el Colegio de… nº …"></div>`,
+    async onSubmit(fd) {
+      const body = {};
+      for (const [k, v] of fd.entries()) body[k] = v;
+      body.tarifaPlana = fd.get('tarifaPlana') === 'on';
+      body.societario = fd.get('societario') === 'on';
+      for (const k of ['ivaRate', 'irpfRate', 'paymentDays', 'retaMonthly']) body[k] = Number(body[k]) || 0;
+      await api('PATCH', 'api/settings', { business: body });
+      render();
+      toast('Datos del negocio guardados');
+    }
+  });
+}
+
+/* ---------------------------------------------------------------- acciones del negocio */
+async function handleBizAction(action, el) {
+  const id = el.dataset.id;
+  switch (action) {
+    case 'ob-profile': {
+      const ob = obState();
+      ob.profile = el.dataset.value;
+      ob.modules = null;
+      render();
+      return true;
+    }
+    case 'ob-next': {
+      const ob = obState();
+      const steps = obSteps(ob);
+      if (steps[ob.step] === 'negocio') {
+        obCollectBusiness();
+        if (ob.business.nif && !F.validateNif(ob.business.nif).ok) { toast(`NIF: ${F.validateNif(ob.business.nif).message}`, 'error'); return true; }
+      }
+      if (steps[ob.step] === 'secciones') {
+        ob.modules = { ...(ob.modules || defaultModulesFor(ob.profile)) };
+        for (const box of $$('[data-ob-module]')) ob.modules[box.dataset.obModule] = box.checked;
+      }
+      ob.step = Math.min(ob.step + 1, steps.length - 1);
+      render();
+      window.scrollTo({ top: 0 });
+      return true;
+    }
+    case 'ob-back': {
+      const ob = obState();
+      if (obSteps(ob)[ob.step] === 'negocio') obCollectBusiness();
+      ob.step = Math.max(0, ob.step - 1);
+      render();
+      return true;
+    }
+    case 'ob-finish':
+      await obFinish(el.dataset.demo === '1');
+      return true;
+    case 'restart-onboarding':
+      ui.ob = null;
+      await api('PATCH', 'api/settings', { onboarded: false });
+      render();
+      return true;
+    case 'hide-steps':
+      localStorage.setItem('mc-steps-hidden', '1');
+      render();
+      return true;
+    case 'set-profile': {
+      const profile = el.dataset.value;
+      const modules = { ...(settings().modules || {}), business: profile !== 'personal' };
+      await api('PATCH', 'api/settings', { profile, modules });
+      render();
+      return true;
+    }
+    case 'edit-business': openBusinessModal(); return true;
+    case 'new-client': openClientModal(); return true;
+    case 'edit-client': { const c = clientById(id); if (c) openClientModal(c); return true; }
+    case 'new-invoice': openInvoiceModal(); return true;
+    case 'open-invoice': { const inv = byId(store.data.invoices, id); if (inv) openInvoiceModal(inv); return true; }
+    case 'inv-filter': ui.invFilter = el.dataset.value; render(); return true;
+    case 'print-invoice': { const inv = byId(store.data.invoices, id); if (inv) printInvoice(inv); return true; }
+    case 'pay-invoice': { const inv = byId(store.data.invoices, id); closeOpenSheets(); if (inv) openPayModal(inv); return true; }
+    case 'unpay-invoice': {
+      const ok = await confirmDialog({ title: 'Marcar como pendiente', message: 'Se borrará el ingreso que se apuntó al cobrarla.', confirm: 'Marcar pendiente' });
+      if (!ok) return true;
+      await api('POST', `api/invoices/${id}/unpay`);
+      closeOpenSheets(); render(); toast('Factura pendiente de cobro');
+      return true;
+    }
+    case 'duplicate-invoice': {
+      const inv = byId(store.data.invoices, id);
+      closeOpenSheets();
+      if (inv) openInvoiceModal(null, { clientId: inv.clientId, lines: inv.lines.map((l) => ({ ...l, qty: Math.abs(l.qty) })), taxMode: inv.taxMode, irpfRate: inv.irpfRate, recargo: inv.recargo, note: inv.kind === 'rectificativa' ? '' : inv.note });
+      return true;
+    }
+    case 'rectify-invoice': {
+      const ok = await confirmDialog({ title: 'Crear factura rectificativa', message: 'Se preparará un borrador en la serie de rectificativas con los mismos conceptos en negativo. Podrás ajustarlo antes de emitirlo.', confirm: 'Preparar', danger: false });
+      if (!ok) return true;
+      const res = await api('POST', `api/invoices/${id}/rectify`);
+      closeOpenSheets(); render();
+      const draft = byId(store.data.invoices, res.createdId);
+      if (draft) openInvoiceModal(draft);
+      return true;
+    }
+    case 'new-purchase': openPurchaseModal(null, el.dataset.kind ? { kind: el.dataset.kind } : {}); return true;
+    case 'edit-purchase': { const p = byId(store.data.purchases, id); if (p) openPurchaseModal(p); return true; }
+    case 'gastos-period': ui.gastosQ = el.dataset.value; render(); return true;
+    case 'tax-q': ui.taxQ = Number(el.dataset.value); ui.taxYear = ui.taxYear || quarterToFile().year; render(); return true;
+    default: return false;
+  }
+}
+document.addEventListener('input', (event) => {
+  const t = event.target;
+  if (t.matches?.('[data-nif]')) {
+    const hint = t.parentElement.querySelector('.nif-hint');
+    if (hint) hint.innerHTML = nifHint(t.value.trim());
+  }
+  if (t.dataset?.reta) {
+    const v = Number(t.value) || 0;
+    if (t.dataset.reta === 'ing') ui.retaIng = v; else ui.retaGas = v;
+    updateRetaResult();
+  }
+});
+document.addEventListener('change', async (event) => {
+  const t = event.target;
+  try {
+    if (t.id === 'taxYear') { ui.taxYear = Number(t.value); ui.taxQ = ui.taxQ || quarterToFile().q; render(); }
+    if (t.name === 'territory' && t.closest('#obBusiness')) {
+      const note = document.querySelector('[data-territory-note]');
+      if (note) { note.hidden = !territoryNotice(t.value); note.querySelector('span').textContent = territoryNotice(t.value); }
+    }
+    if (t.dataset?.moduleToggle) {
+      const modules = { ...(settings().modules || {}), [t.dataset.moduleToggle]: t.checked };
+      await api('PATCH', 'api/settings', { modules });
+      render();
+    }
+  } catch (err) { toast(err.message, 'error'); }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  const row = event.target.closest?.('tr.row-link[data-action]');
+  if (row) row.click();
+});
+
 /* ---------------------------------------------------------------- vistas y arranque */
 const VIEWS = {
   resumen: viewResumen,
@@ -3849,7 +5097,12 @@ const VIEWS = {
   prestamos: viewPrestamos,
   informes: viewInformes,
   mas: viewMas,
-  ajustes: viewAjustes
+  ajustes: viewAjustes,
+  facturas: viewFacturas,
+  clientes: viewClientes,
+  gastos: viewGastos,
+  impuestos: viewImpuestos,
+  cuota: viewCuota
 };
 
 boot();

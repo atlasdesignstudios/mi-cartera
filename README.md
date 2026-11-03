@@ -1,8 +1,26 @@
 # Mi Cartera
 
-App de finanzas personales **100 % local** para tu ordenador y tu móvil. Sin cuentas, sin anuncios, sin nube y sin dependencias externas: solo Node.js.
+**Gestoría privada para autónomos y particulares en España.** Facturas con IVA e IRPF, modelos 303 y 130, cuota de autónomos y tus finanzas personales en una sola app **100 % local**: sin cuentas, sin anuncios, sin nube y sin dependencias externas (solo Node.js).
 
-## Qué incluye
+## Para quién es
+
+Al abrirla por primera vez, un asistente de 4 pasos te pregunta cómo la vas a usar y solo muestra lo que necesitas:
+
+- **Autónomo**: facturas, clientes, gastos del negocio, impuestos trimestrales y cuota de autónomos. Las secciones personales se pueden activar después.
+- **Particular**: cuentas, movimientos, presupuestos, objetivos, inversiones y préstamos, sin nada fiscal.
+- **Las dos cosas**: todo, separado en grupos «Negocio» y «Personal» en el menú.
+
+Puedes empezar vacío o con datos de ejemplo, y cambiar el perfil o activar/desactivar secciones en **Ajustes → Perfil y secciones**.
+
+## Para autónomos
+
+- **Facturas**: numeración correlativa por serie y año (F2026-0001…), con fechas que no pueden ir hacia atrás. Varias líneas por factura con IVA al 21, 10, 4 o 0 %, retención de IRPF (15 %, 7 % para nuevos autónomos, 19 % o sin retención), recargo de equivalencia y operaciones exentas, intracomunitarias, con inversión del sujeto pasivo o exportaciones (con su mención legal). Totales en vivo, borradores, vista previa y **PDF** desde el navegador. Una factura emitida no se borra: se **rectifica** (factura rectificativa en serie R). Al marcarla **cobrada** se apunta sola como ingreso en tu cuenta.
+- **Clientes**: datos fiscales con **validación de NIF, NIE y CIF** al escribir. Se copian en cada factura para que no cambien si editas el cliente.
+- **Gastos del negocio**: facturas recibidas con base, IVA deducible y porcentaje de afectación (por ejemplo, 50 % del móvil). Cada gasto genera su movimiento y se mantiene sincronizado.
+- **Impuestos**: **modelo 303** (IVA) y **modelo 130** (pago fraccionado del IRPF) de cada trimestre con las casillas que tienes que copiar en la sede de la Agencia Tributaria, cuánto apartar para Hacienda, calendario de plazos con aviso de los días que quedan y nota sobre Verifactu.
+- **Cuota de autónomos**: calcula tu tramo de 2026 según tus rendimientos previstos, la cuota mínima, si te conviene cambiar de base, la tarifa plana (y su prórroga) y una estimación de la regularización del año siguiente.
+
+## Para tus finanzas personales
 
 - **Resumen**: patrimonio neto, ingresos, gastos, ahorro y tasa de ahorro del mes, gráfico de los últimos 6 meses, reparto de gastos por categoría, últimos movimientos, presupuestos, próximos cobros y pagos (30 días) y objetivos de ahorro.
 - **Movimientos**: ingresos, gastos y transferencias entre cuentas, con categorías, notas, búsqueda y filtros por tipo, categoría, cuenta y mes. Puedes **duplicar** un movimiento o marcar **Repetir automáticamente** para convertirlo en recurrente.
@@ -37,7 +55,7 @@ Se abre el navegador en `http://localhost:4321`. Si ya tenías Mi Cartera abiert
 Puedes abrirla como página web en **https://atlasdesignstudios.github.io/mi-cartera/**.
 
 - No necesita servidor: la misma lógica de `server.js` se ejecuta dentro del navegador y los datos se guardan en su `localStorage`. **No se envían a ningún sitio**, ni siquiera a GitHub.
-- Cada navegador y dispositivo tiene sus propios datos. La primera visita carga datos de ejemplo; usa **Ajustes → Borrar todo** para empezar de cero.
+- Cada navegador y dispositivo tiene sus propios datos. La primera visita abre el asistente de inicio, donde eliges empezar vacío o con datos de ejemplo.
 - Si borras los datos del navegador, se pierden: usa **Exportar** a menudo. Las copias son compatibles con la versión local (puedes pasar datos de una a otra con Exportar/Importar).
 - Se publica sola con cada `push` a `main` (`.github/workflows/pages.yml`). Para generarla a mano: `node scripts/build-web.js` (crea `dist/`).
 
@@ -95,6 +113,20 @@ Añade el **símbolo de cotización** a cada inversión (`IWDA.AS`, `AAPL`, `SAN
 
 La moneda solo cambia el símbolo de visualización: no convierte importes históricos.
 
+## Cálculos fiscales
+
+Están en `public/fiscal.js`, sin dependencias, y sirven para **estimación directa simplificada en territorio común** (no País Vasco, Navarra, Canarias, Ceuta ni Melilla). Son orientativos: compruébalos antes de presentar y, si tienes dudas, consulta con un asesor.
+
+- **Factura**: base = Σ (unidades × precio × (1 − descuento)); IVA por tipo; IRPF = base × retención; total = base + IVA + recargo − IRPF. En exentas, intracomunitarias, inversión del sujeto pasivo y exportaciones no se repercute IVA.
+- **Modelo 303**: IVA repercutido de las facturas emitidas del trimestre − IVA soportado deducible de los gastos (× afectación). Si sale negativo, se compensa en trimestres siguientes (o se pide devolución en el 4T).
+- **Modelo 130**: acumulado del 1 de enero al final del trimestre. Rendimiento = ingresos − gastos deducibles − gastos de difícil justificación (5 %, máximo 2.000 € al año). Se paga el 20 % menos los pagos de trimestres anteriores y las retenciones soportadas. Si el 70 % o más de tus ingresos del año anterior tuvo retención, no estás obligado a presentarlo.
+- **Plazos**: 1-20 de abril, julio y octubre, y 1-30 de enero para el 4T. Si domicilias el pago, el plazo acaba 5 días antes.
+- **Cuota de autónomos**: rendimiento computable = (ingresos − gastos deducibles) × 0,93 (7 % de gastos genéricos) / 12. Con él se busca el tramo de la tabla de 2026 y se aplica el 31,5 % a la base mínima. La tarifa plana es de 80 € al mes (88,64 € con el MEI) durante 12 meses, prorrogables otros 12 si los rendimientos no superan el SMI anual.
+
+Las tablas de cotización son las de la Orden PJC/297/2026, que mantiene en 2026 las cuotas de 2025. Para actualizarlas, cambia `RETA_TABLE` en `public/fiscal.js`.
+
+> Mi Cartera aún **no es un sistema certificado Verifactu**. Hoy no es obligatorio para autónomos y Hacienda ha anunciado que lo retrasará; cuando lo sea, la app se adaptará.
+
 ## Estructura
 
 ```
@@ -102,6 +134,7 @@ server.js              servidor HTTP + API + persistencia (sin dependencias)
 public/index.html      interfaz
 public/styles.css      estilos (claro/oscuro, móvil)
 public/app.js          lógica y vistas
+public/fiscal.js       IVA, IRPF, NIF, modelos 303/130 y cuota de autónomos
 public/sw.js           caché offline del shell
 public/vendor/qrcode.js generador de QR (MIT, Kazuhiko Arase), incluido en local
 permitir-movil.bat     abre el puerto en el cortafuegos de Windows (redes privadas)
@@ -122,6 +155,13 @@ Los que antes había que resolver a mano ya los resuelve la app:
 - **El navegador muestra datos antiguos**: el service worker ya no reutiliza archivos guardados por el navegador, la app detecta si el servidor tiene una versión más nueva y se recarga sola, y los datos se refrescan al volver a la pestaña. Si aun así ves algo raro: **Ajustes → Forzar actualización**.
 - **Restaurar una copia**: **Ajustes → Datos → Copias automáticas → Restaurar**. Antes se guarda una copia de lo que tienes ahora, así que se puede deshacer.
 - **Cambiar de ordenador**: **Ajustes → Sincronización cifrada → Crear** en el antiguo y **Abrir → Reemplazar todo** en el nuevo (o copia la carpeta `data/`).
+
+## Novedades de la 1.4
+
+- Nuevo enfoque: gestoría privada para autónomos y particulares en España.
+- Asistente de inicio y perfiles: la app solo muestra lo que usas.
+- Facturas, clientes, gastos del negocio, impuestos (303 y 130) y cuota de autónomos.
+- Menú lateral agrupado en «Negocio» y «Personal» y resumen adaptado a cada perfil.
 
 ## Novedades de la 1.3
 

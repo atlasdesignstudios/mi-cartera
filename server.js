@@ -6,6 +6,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { invoiceTotals, purchaseTotals, validateNif, IVA_RATES, TAX_MODES } from './public/fiscal.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -13,7 +14,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const PORT = Number(process.env.PORT) || 4321;
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 let LISTEN_PORT = PORT;
 
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -21,7 +22,12 @@ fs.mkdirSync(BACKUP_DIR, { recursive: true });
 const ACCOUNT_TYPES = ['bank', 'savings', 'cash', 'card', 'broker', 'other'];
 const INVEST_TYPES = ['stock', 'etf', 'fund', 'crypto', 'deposit', 'other'];
 const TX_TYPES = ['income', 'expense', 'transfer'];
-const COLLECTIONS = ['accounts', 'categories', 'transactions', 'investments', 'ops', 'recurring', 'goals', 'loans'];
+const COLLECTIONS = ['accounts', 'categories', 'transactions', 'investments', 'ops', 'recurring', 'goals', 'loans', 'clients', 'invoices', 'purchases'];
+const PROFILES = ['personal', 'autonomo', 'ambos'];
+const MODULE_KEYS = ['budgets', 'recurring', 'goals', 'investments', 'loans', 'reports', 'business'];
+const PURCHASE_KINDS = ['compras', 'material', 'suministros', 'alquiler', 'telefono', 'software', 'servicios', 'gestoria', 'publicidad', 'formacion', 'viajes', 'vehiculo', 'seguros', 'reta', 'otros'];
+const CLIENT_KINDS = ['empresa', 'autonomo', 'particular'];
+const TERRITORIES = ['comun', 'canarias', 'ceutamelilla', 'foral'];
 const LOAN_TYPES = ['mortgage', 'personal', 'car', 'student', 'other'];
 const SYMBOL_RE = /^[A-Za-z0-9.\-=^]{1,24}$/;
 const FREQUENCIES = ['weekly', 'monthly', 'quarterly', 'yearly'];
@@ -72,7 +78,7 @@ function defaultState() {
   });
   return {
     rev: 0,
-    settings: { currency: 'EUR', locale: 'es-ES', theme: 'auto', pinHash: null, autoPrices: false, pricesRefreshedAt: null },
+    settings: { currency: 'EUR', locale: 'es-ES', theme: 'auto', pinHash: null, autoPrices: false, pricesRefreshedAt: null, profile: 'personal', onboarded: false, modules: defaultModules('personal'), business: sanitizeBusiness({}) },
     accounts: [
       acc('Cuenta principal', 'bank', '#0e9f6e'),
       acc('Ahorro', 'savings', '#3b82f6'),
@@ -106,6 +112,9 @@ function defaultState() {
     recurring: [],
     goals: [],
     loans: [],
+    clients: [],
+    invoices: [],
+    purchases: [],
     deleted: []
   };
 }
@@ -149,9 +158,13 @@ function loadDb() {
       recurring: Array.isArray(parsed.recurring) ? parsed.recurring : [],
       goals: Array.isArray(parsed.goals) ? parsed.goals : [],
       loans: Array.isArray(parsed.loans) ? parsed.loans : [],
+      clients: Array.isArray(parsed.clients) ? parsed.clients : [],
+      invoices: Array.isArray(parsed.invoices) ? parsed.invoices : [],
+      purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
       deleted: Array.isArray(parsed.deleted) ? parsed.deleted : []
     };
     state.rev = Number(state.rev) || 0;
+    upgradeSettings(state, parsed.settings || {});
     return state;
   } catch (err) {
     if (err.code === 'ENOENT') {
@@ -180,6 +193,9 @@ function publicState() {
     recurring: db.recurring,
     goals: db.goals,
     loans: db.loans,
+    clients: db.clients,
+    invoices: db.invoices,
+    purchases: db.purchases,
     deleted: db.deleted,
     serverTime: new Date().toISOString()
   };
@@ -315,6 +331,8 @@ function sanitizeTransaction(obj, prev) {
     categoryId,
     note: clean(obj.note, 500),
     recurringId: prev ? prev.recurringId || null : (db.recurring.some((r) => r.id === obj.recurringId) ? obj.recurringId : null),
+    invoiceId: prev?.invoiceId || null,
+    purchaseId: prev?.purchaseId || null,
     createdAt: prev?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -516,6 +534,299 @@ function sanitizeLoan(obj, prev, refs = db) {
   };
 }
 
+
+// ---------------------------------------------------------------- perfil y negocio (autónomos en España)
+function defaultModules(profile) {
+  const business = profile === 'autonomo' || profile === 'ambos';
+  return {
+    budgets: profile !== 'autonomo', recurring: true, goals: profile !== 'autonomo',
+    investments: false, loans: false, reports: true, business
+  };
+}
+function sanitizeModules(obj, fallback) {
+  const out = { ...fallback };
+  for (const k of MODULE_KEYS) if (obj && obj[k] !== undefined) out[k] = Boolean(obj[k]);
+  return out;
+}
+function sanitizeBusiness(obj = {}, prev = {}) {
+  const b = { ...prev, ...(obj || {}) };
+  const num = (v, min, max, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : d; };
+  const series = clean(b.series, 6).toUpperCase().replace(/[^A-Z0-9]/g, '') || 'F';
+  let seriesR = clean(b.seriesR, 6).toUpperCase().replace(/[^A-Z0-9]/g, '') || 'R';
+  if (seriesR === series) seriesR = series + 'R';
+  return {
+    name: clean(b.name, 120),
+    tradeName: clean(b.tradeName, 120),
+    nif: clean(b.nif, 20).toUpperCase().replace(/[\s.-]/g, ''),
+    address: clean(b.address, 160),
+    zip: clean(b.zip, 10),
+    city: clean(b.city, 80),
+    province: clean(b.province, 80),
+    email: clean(b.email, 120),
+    phone: clean(b.phone, 30),
+    iban: clean(b.iban, 40).toUpperCase().replace(/\s+/g, ' '),
+    activity: b.activity === 'empresarial' ? 'empresarial' : 'profesional',
+    iae: clean(b.iae, 60),
+    startDate: validDate(b.startDate) ? b.startDate : '',
+    tarifaPlana: Boolean(b.tarifaPlana),
+    societario: Boolean(b.societario),
+    territory: TERRITORIES.includes(b.territory) ? b.territory : 'comun',
+    ivaRate: IVA_RATES.includes(Number(b.ivaRate)) ? Number(b.ivaRate) : 21,
+    irpfRate: num(b.irpfRate, 0, 47, 15),
+    retaBase: round2(num(b.retaBase, 0, 10000, 0)),
+    retaMonthly: round2(num(b.retaMonthly, 0, 3000, 0)),
+    paymentDays: Math.round(num(b.paymentDays, 0, 365, 30)),
+    series,
+    seriesR,
+    footer: clean(b.footer, 400)
+  };
+}
+/** Completa los ajustes nuevos sin cambiar nada a quien ya usaba la app. */
+function upgradeSettings(state, raw) {
+  const s = state.settings;
+  s.profile = PROFILES.includes(raw.profile) ? raw.profile : 'personal';
+  const hadData = (state.transactions || []).length > 0 || (state.investments || []).length > 0;
+  s.onboarded = raw.onboarded === undefined ? hadData : Boolean(raw.onboarded);
+  // Usuarios de versiones anteriores: todo visible, como lo tenían.
+  const legacy = raw.modules === undefined && hadData
+    ? { budgets: true, recurring: true, goals: true, investments: true, loans: true, reports: true, business: s.profile !== 'personal' }
+    : defaultModules(s.profile);
+  s.modules = sanitizeModules(raw.modules, legacy);
+  s.business = sanitizeBusiness(raw.business || {});
+}
+function ensureCategory(name, kind, icon, color) {
+  let cat = db.categories.find((c) => c.kind === kind && c.name === name);
+  if (!cat) {
+    cat = { id: uid(), name, kind, icon, color, budget: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    db.categories.push(cat);
+  }
+  return cat;
+}
+function cleanNif(v) { return clean(v, 20).toUpperCase().replace(/[\s.-]/g, ''); }
+function sanitizeClient(obj, prev) {
+  const name = clean(obj.name, 120);
+  if (!name) throw bad('Indica el nombre o la razón social del cliente.');
+  const nif = cleanNif(obj.nif);
+  if (nif) {
+    const check = validateNif(nif);
+    if (!check.ok) throw bad(`NIF del cliente: ${check.message}.`);
+  }
+  const kind = CLIENT_KINDS.includes(obj.kind) ? obj.kind : 'empresa';
+  return {
+    id: ensureId(obj, prev),
+    name,
+    nif,
+    kind,
+    address: clean(obj.address, 160),
+    zip: clean(obj.zip, 10),
+    city: clean(obj.city, 80),
+    province: clean(obj.province, 80),
+    country: clean(obj.country, 40) || 'España',
+    email: clean(obj.email, 120),
+    phone: clean(obj.phone, 30),
+    taxMode: TAX_MODES[obj.taxMode] ? obj.taxMode : 'normal',
+    irpfRate: obj.irpfRate === '' || obj.irpfRate === undefined || obj.irpfRate === null ? null : Math.min(47, Math.max(0, Number(obj.irpfRate) || 0)),
+    recargo: Boolean(obj.recargo),
+    note: clean(obj.note, 300),
+    createdAt: prev?.createdAt || clean(obj.createdAt, 40) || new Date().toISOString()
+  };
+}
+function sanitizeLines(list) {
+  const lines = (Array.isArray(list) ? list : []).slice(0, 100).map((l) => ({
+    desc: clean(l?.desc, 300),
+    qty: Math.round((Number(l?.qty) || 0) * 1000) / 1000,
+    price: round6(l?.price),
+    discount: Math.min(100, Math.max(0, round2(l?.discount))),
+    ivaRate: IVA_RATES.includes(Number(l?.ivaRate)) ? Number(l.ivaRate) : 21
+  })).filter((l) => l.desc || l.qty || l.price);
+  return lines;
+}
+function sanitizeInvoice(obj, prev) {
+  // Una factura emitida es inalterable: solo se pueden cambiar la nota interna y el vencimiento.
+  if (prev && prev.status !== 'draft') {
+    return { ...prev, internalNote: clean(obj.internalNote, 300), dueDate: validDate(obj.dueDate) ? obj.dueDate : prev.dueDate };
+  }
+  const lines = sanitizeLines(obj.lines);
+  const clientId = obj.clientId && db.clients.some((c) => c.id === obj.clientId) ? obj.clientId : null;
+  const kind = obj.kind === 'rectificativa' ? 'rectificativa' : 'ordinaria';
+  const series = clean(obj.series, 6).toUpperCase().replace(/[^A-Z0-9]/g, '')
+    || (kind === 'rectificativa' ? db.settings.business.seriesR : db.settings.business.series) || 'F';
+  const item = {
+    id: ensureId(obj, prev),
+    kind,
+    status: 'draft',
+    series,
+    number: null,
+    date: validDate(obj.date) ? obj.date : todayISO(),
+    opDate: validDate(obj.opDate) ? obj.opDate : '',
+    dueDate: validDate(obj.dueDate) ? obj.dueDate : '',
+    clientId,
+    lines,
+    taxMode: TAX_MODES[obj.taxMode] ? obj.taxMode : 'normal',
+    irpfRate: Math.min(47, Math.max(0, Number(obj.irpfRate) || 0)),
+    recargo: Boolean(obj.recargo),
+    note: clean(obj.note, 600),
+    internalNote: clean(obj.internalNote, 300),
+    rectifiesId: kind === 'rectificativa' && db.invoices.some((i) => i.id === obj.rectifiesId) ? obj.rectifiesId : null,
+    rectifyReason: clean(obj.rectifyReason, 300),
+    createdAt: prev?.createdAt || clean(obj.createdAt, 40) || new Date().toISOString()
+  };
+  item.total = invoiceTotals(item).total;
+  return item;
+}
+function clientSnapshot(c) {
+  return c ? { name: c.name, nif: c.nif, kind: c.kind, address: c.address, zip: c.zip, city: c.city, province: c.province, country: c.country, email: c.email } : null;
+}
+function sellerSnapshot() {
+  const b = db.settings.business;
+  return { name: b.name, tradeName: b.tradeName, nif: b.nif, address: b.address, zip: b.zip, city: b.city, province: b.province, email: b.email, phone: b.phone, iban: b.iban, footer: b.footer };
+}
+function issueInvoice(inv) {
+  const b = db.settings.business;
+  if (!b.name || !b.nif) throw bad('Antes de emitir, completa tu nombre y NIF en Ajustes → Mi negocio.');
+  const own = validateNif(b.nif);
+  if (!own.ok) throw bad(`Tu NIF no es válido: ${own.message}. Revísalo en Ajustes → Mi negocio.`);
+  const client = db.clients.find((c) => c.id === inv.clientId);
+  if (!client) throw bad('Elige un cliente para poder emitir la factura.');
+  if (!inv.lines.length || !inv.lines.some((l) => l.desc)) throw bad('Añade al menos un concepto con descripción.');
+  if ((client.kind !== 'particular' || inv.taxMode === 'intracom' || inv.taxMode === 'isp') && !client.nif) {
+    throw bad('Este cliente necesita NIF en la factura. Añádelo en su ficha.');
+  }
+  if (inv.kind === 'rectificativa' && !inv.rectifiesId) throw bad('Indica qué factura rectificas.');
+  const year = inv.date.slice(0, 4);
+  const same = db.invoices.filter((i) => i.id !== inv.id && i.number && i.series === inv.series && i.date.slice(0, 4) === year);
+  const last = same.sort((a, b2) => (a.seq || 0) - (b2.seq || 0)).at(-1);
+  if (last && inv.date < last.date) {
+    throw bad(`La numeración debe ser correlativa: la fecha no puede ser anterior a la de ${last.number} (${last.date.split('-').reverse().join('/')}).`);
+  }
+  const seq = (last?.seq || 0) + 1;
+  inv.seq = seq;
+  inv.number = `${inv.series}${year}-${String(seq).padStart(4, '0')}`;
+  inv.status = 'issued';
+  inv.issuedAt = new Date().toISOString();
+  if (!inv.dueDate) {
+    const d = parseDate(inv.date);
+    d.setDate(d.getDate() + (Number(b.paymentDays) || 0));
+    inv.dueDate = isoOf(d);
+  }
+  inv.seller = sellerSnapshot();
+  inv.buyer = clientSnapshot(client);
+  const t = invoiceTotals(inv);
+  inv.totals = { base: t.base, iva: t.iva, re: t.re, irpf: t.irpf, total: t.total, byRate: t.byRate };
+  inv.total = t.total;
+  inv.updatedAt = new Date().toISOString();
+  return inv;
+}
+function payInvoice(inv, body) {
+  if (inv.status === 'draft') throw bad('Primero emite la factura.');
+  const account = db.accounts.find((a) => a.id === body.accountId) || db.accounts[0];
+  if (!account) throw bad('Crea una cuenta para registrar el cobro.');
+  const cat = ensureCategory('Facturación', 'income', '🧾', '#0e9f6e');
+  const total = round2(inv.total ?? invoiceTotals(inv).total);
+  const date = validDate(body.date) ? body.date : todayISO();
+  const existing = inv.transactionId && db.transactions.find((t) => t.id === inv.transactionId);
+  if (existing) {
+    Object.assign(existing, { amount: Math.abs(total), date, accountId: account.id, updatedAt: new Date().toISOString() });
+  } else if (total > 0) {
+    const tx = {
+      id: uid(), type: 'income', amount: total, date, accountId: account.id, toAccountId: null, categoryId: cat.id,
+      note: `Cobro ${inv.number} · ${inv.buyer?.name || ''}`.trim(), recurringId: null, invoiceId: inv.id, purchaseId: null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    };
+    db.transactions.push(tx);
+    inv.transactionId = tx.id;
+  } else if (total < 0) {
+    const tx = {
+      id: uid(), type: 'expense', amount: Math.abs(total), date, accountId: account.id, toAccountId: null,
+      categoryId: ensureCategory('Gastos del negocio', 'expense', '💼', '#64748b').id,
+      note: `Abono ${inv.number} · ${inv.buyer?.name || ''}`.trim(), recurringId: null, invoiceId: inv.id, purchaseId: null,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    };
+    db.transactions.push(tx);
+    inv.transactionId = tx.id;
+  }
+  inv.status = 'paid';
+  inv.paidDate = date;
+  inv.updatedAt = new Date().toISOString();
+}
+function unpayInvoice(inv) {
+  if (inv.transactionId) {
+    db.transactions = db.transactions.filter((t) => t.id !== inv.transactionId);
+    recordDeletion('transactions', inv.transactionId);
+  }
+  inv.transactionId = null;
+  inv.paidDate = null;
+  inv.status = 'issued';
+  inv.updatedAt = new Date().toISOString();
+}
+function rectifyInvoice(orig) {
+  if (orig.status === 'draft') throw bad('Un borrador se puede editar directamente.');
+  const draft = sanitizeInvoice({
+    kind: 'rectificativa', rectifiesId: orig.id, clientId: orig.clientId, date: todayISO(),
+    lines: orig.lines.map((l) => ({ ...l, qty: -l.qty })), taxMode: orig.taxMode, irpfRate: orig.irpfRate, recargo: orig.recargo,
+    rectifyReason: 'Anulación total de la factura ' + orig.number,
+    note: `Factura rectificativa de ${orig.number} de fecha ${orig.date.split('-').reverse().join('/')} (art. 15 RD 1619/2012).`
+  }, null);
+  draft.updatedAt = new Date().toISOString();
+  db.invoices.push(draft);
+  return draft;
+}
+function sanitizePurchase(obj, prev) {
+  const kind = PURCHASE_KINDS.includes(obj.kind) ? obj.kind : 'otros';
+  const supplier = clean(obj.supplier, 120) || (kind === 'reta' ? 'Seguridad Social (RETA)' : '');
+  if (!supplier) throw bad('Indica el proveedor.');
+  const base = round2(obj.base);
+  if (!(base > 0)) throw bad('La base imponible debe ser mayor que cero.');
+  const nif = cleanNif(obj.supplierNif);
+  if (nif && !validateNif(nif).ok) throw bad(`NIF del proveedor: ${validateNif(nif).message}.`);
+  const ivaRate = kind === 'reta' ? 0 : IVA_RATES.includes(Number(obj.ivaRate)) ? Number(obj.ivaRate) : 21;
+  const hasIva = obj.ivaAmount !== undefined && obj.ivaAmount !== null && obj.ivaAmount !== '';
+  const item = {
+    id: ensureId(obj, prev),
+    date: validDate(obj.date) ? obj.date : todayISO(),
+    supplier,
+    supplierNif: nif,
+    number: clean(obj.number, 40),
+    concept: clean(obj.concept, 200),
+    kind,
+    base,
+    ivaRate,
+    ivaAmount: hasIva && kind !== 'reta' ? round2(obj.ivaAmount) : null,
+    deductiblePct: Math.min(100, Math.max(0, Math.round(Number(obj.deductiblePct ?? 100)))),
+    ivaNoDeducible: Boolean(obj.ivaNoDeducible),
+    irpfRate: Math.min(47, Math.max(0, Number(obj.irpfRate) || 0)),
+    accountId: obj.accountId && db.accounts.some((a) => a.id === obj.accountId) ? obj.accountId : null,
+    transactionId: prev?.transactionId || null,
+    note: clean(obj.note, 300),
+    createdAt: prev?.createdAt || clean(obj.createdAt, 40) || new Date().toISOString()
+  };
+  item.total = purchaseTotals(item).total;
+  return item;
+}
+/** Mantiene el pago de un gasto con factura como movimiento de la cuenta elegida. */
+function linkPurchaseTx(p) {
+  const existing = p.transactionId && db.transactions.find((t) => t.id === p.transactionId);
+  if (!p.accountId) {
+    if (existing) { db.transactions = db.transactions.filter((t) => t.id !== existing.id); recordDeletion('transactions', existing.id); }
+    p.transactionId = null;
+    return;
+  }
+  const cat = p.kind === 'reta'
+    ? ensureCategory('Cuota de autónomos', 'expense', '🧾', '#64748b')
+    : ensureCategory('Gastos del negocio', 'expense', '💼', '#64748b');
+  const note = `${p.supplier}${p.number ? ' · ' + p.number : ''}${p.concept ? ' · ' + p.concept : ''}`.slice(0, 500);
+  if (existing) {
+    Object.assign(existing, { amount: p.total, date: p.date, accountId: p.accountId, note, updatedAt: new Date().toISOString() });
+  } else {
+    const tx = {
+      id: uid(), type: 'expense', amount: p.total, date: p.date, accountId: p.accountId, toAccountId: null, categoryId: cat.id,
+      note, recurringId: null, invoiceId: null, purchaseId: p.id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    };
+    db.transactions.push(tx);
+    p.transactionId = tx.id;
+  }
+}
+
 /** Genera los movimientos de las reglas recurrentes que ya han vencido. Devuelve cuántos ha creado. */
 function runRecurring() {
   const today = todayISO();
@@ -571,10 +882,11 @@ function monthDate(offset, day) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function demoState() {
+function demoState(profile = 'personal') {
   const s = defaultState();
+  const freelancer = profile === 'autonomo';
   const [main, savings, cash] = s.accounts;
-  main.initialBalance = 2350;
+  main.initialBalance = freelancer ? 6400 : 2350;
   savings.initialBalance = 4200;
   cash.initialBalance = 180;
   const budgets = {
@@ -592,8 +904,8 @@ function demoState() {
     });
 
   for (let off = -5; off <= 0; off += 1) {
-    add('income', 2850, off, 1, main.id, 'Nómina', 'Nómina mensual');
-    if (off === -4 || off === -1) add('income', 480, off, 12, main.id, 'Freelance', 'Proyecto web');
+    if (!freelancer) add('income', 2850, off, 1, main.id, 'Nómina', 'Nómina mensual');
+    if (!freelancer && (off === -4 || off === -1)) add('income', 480, off, 12, main.id, 'Freelance', 'Proyecto web');
     add('expense', 950, off, 2, main.id, 'Vivienda', 'Alquiler');
     add('expense', 59.9, off, 3, main.id, 'Suscripciones', 'Internet y móvil');
     add('expense', 12.99, off, 4, main.id, 'Suscripciones', 'Streaming');
@@ -634,42 +946,111 @@ function demoState() {
       active: true, createdAt: new Date().toISOString()
     });
   };
-  rule('income', 2850, main.id, 'Nómina', 'Nómina mensual', 'monthly', 1);
+  if (!freelancer) rule('income', 2850, main.id, 'Nómina', 'Nómina mensual', 'monthly', 1);
   rule('expense', 950, main.id, 'Vivienda', 'Alquiler', 'monthly', 2);
   rule('expense', 59.9, main.id, 'Suscripciones', 'Internet y móvil', 'monthly', 3);
   rule('expense', 12.99, main.id, 'Suscripciones', 'Streaming', 'monthly', 4);
   rule('transfer', 350, main.id, null, 'Ahorro automático', 'monthly', 3, savings.id);
   rule('expense', 320, main.id, 'Impuestos', 'Seguro del coche', 'yearly', 15);
 
-  s.goals.push(
-    { id: uid(), name: 'Fondo de emergencia', icon: '🛟', color: '#3b82f6', target: 9000, saved: 0, accountId: savings.id, deadline: monthDate(10, 1), note: '6 meses de gastos', done: false, createdAt: new Date().toISOString() },
-    { id: uid(), name: 'Viaje a Japón', icon: '✈️', color: '#ec4899', target: 3200, saved: 850, accountId: null, deadline: monthDate(8, 1), note: '', done: false, createdAt: new Date().toISOString() }
-  );
+  if (!freelancer) {
+    s.goals.push(
+      { id: uid(), name: 'Fondo de emergencia', icon: '🛟', color: '#3b82f6', target: 9000, saved: 0, accountId: savings.id, deadline: monthDate(10, 1), note: '6 meses de gastos', done: false, createdAt: new Date().toISOString() },
+      { id: uid(), name: 'Viaje a Japón', icon: '✈️', color: '#ec4899', target: 3200, saved: 850, accountId: null, deadline: monthDate(8, 1), note: '', done: false, createdAt: new Date().toISOString() }
+    );
 
-  const world = inv('MSCI World', 'IWDA', 'etf', 112.4, '#3b82f6', 'ETF global acumulativo', 'IWDA.AS');
-  op(world.id, 'buy', 8, 94.1, 1, -7, 10, 'Primera aportación');
-  op(world.id, 'buy', 14, 101.3, 1, -4, 8, 'Aportación periódica');
+    const world = inv('MSCI World', 'IWDA', 'etf', 112.4, '#3b82f6', 'ETF global acumulativo', 'IWDA.AS');
+    op(world.id, 'buy', 8, 94.1, 1, -7, 10, 'Primera aportación');
+    op(world.id, 'buy', 14, 101.3, 1, -4, 8, 'Aportación periódica');
 
-  const aapl = inv('Apple', 'AAPL', 'stock', 214.5, '#64748b', 'Acciones');
-  op(aapl.id, 'buy', 4, 181.2, 1, -5, 14, '');
+    const aapl = inv('Apple', 'AAPL', 'stock', 214.5, '#64748b', 'Acciones');
+    op(aapl.id, 'buy', 4, 181.2, 1, -5, 14, '');
 
-  const btc = inv('Bitcoin', 'BTC', 'crypto', 61500, '#f59e0b', 'Criptomoneda');
-  op(btc.id, 'buy', 0.018, 54000, 2, -6, 20, '');
-  op(btc.id, 'buy', 0.024, 58000, 2, -2, 18, '');
+    const btc = inv('Bitcoin', 'BTC', 'crypto', 61500, '#f59e0b', 'Criptomoneda');
+    op(btc.id, 'buy', 0.018, 54000, 2, -6, 20, '');
+    op(btc.id, 'buy', 0.024, 58000, 2, -2, 18, '');
 
-  const fund = inv('Fondo indexado', 'FIDX', 'fund', 14.9, '#8b5cf6', 'Plan de pensiones');
-  op(fund.id, 'buy', 82, 12.85, 0, -3, 5, 'Aportación anual');
+    const fund = inv('Fondo indexado', 'FIDX', 'fund', 14.9, '#8b5cf6', 'Plan de pensiones');
+    op(fund.id, 'buy', 82, 12.85, 0, -3, 5, 'Aportación anual');
 
-  s.loans.push({
-    id: uid(), name: 'Préstamo del coche', type: 'car', principal: 14000, annualRate: 6.5, termMonths: 60,
-    startDate: monthDate(-14, 5), extraPayments: [], accountId: main.id, categoryId: catId('Transporte'),
-    recurringId: null, color: '#64748b', note: 'Financiación del concesionario', createdAt: new Date().toISOString()
-  });
-  rule('expense', 273.93, main.id, 'Transporte', 'Cuota Préstamo del coche', 'monthly', 5);
-  s.loans[0].recurringId = s.recurring[s.recurring.length - 1].id;
-  s.recurring[s.recurring.length - 1].endDate = monthDate(-14 + 59, 5);
+    s.loans.push({
+      id: uid(), name: 'Préstamo del coche', type: 'car', principal: 14000, annualRate: 6.5, termMonths: 60,
+      startDate: monthDate(-14, 5), extraPayments: [], accountId: main.id, categoryId: catId('Transporte'),
+      recurringId: null, color: '#64748b', note: 'Financiación del concesionario', createdAt: new Date().toISOString()
+    });
+    rule('expense', 273.93, main.id, 'Transporte', 'Cuota Préstamo del coche', 'monthly', 5);
+    s.loans[0].recurringId = s.recurring[s.recurring.length - 1].id;
+    s.recurring[s.recurring.length - 1].endDate = monthDate(-14 + 59, 5);
+  }
 
+  if (profile !== 'personal') addBusinessDemo(s, main.id);
   return s;
+}
+
+/** Datos de ejemplo de un diseñador autónomo: clientes, facturas, gastos con IVA y cuota de autónomos. */
+function addBusinessDemo(s, accountId) {
+  const now = new Date().toISOString();
+  const income = { id: uid(), name: 'Facturación', kind: 'income', icon: '🧾', color: '#0e9f6e', budget: 0, createdAt: now };
+  const bizCat = { id: uid(), name: 'Gastos del negocio', kind: 'expense', icon: '💼', color: '#64748b', budget: 0, createdAt: now };
+  const retaCat = { id: uid(), name: 'Cuota de autónomos', kind: 'expense', icon: '🧾', color: '#64748b', budget: 0, createdAt: now };
+  s.categories.push(income, bizCat, retaCat);
+  const client = (name, nif, kind, city, extra = {}) => {
+    const c = { id: uid(), name, nif, kind, address: 'Calle Mayor 1', zip: '28013', city, province: city, country: 'España', email: '', phone: '', taxMode: 'normal', irpfRate: null, recargo: false, note: '', createdAt: now, ...extra };
+    s.clients.push(c);
+    return c;
+  };
+  const a = client('Estudio Norte S.L.', 'B12345674', 'empresa', 'Madrid');
+  const b = client('Lucía Romero Gil', '12345678Z', 'autonomo', 'Valencia');
+  const c = client('Café La Plaza S.L.', 'B87654323', 'empresa', 'Sevilla');
+  const projects = [
+    [a, 'Diseño de identidad visual', 1800], [b, 'Maquetación de catálogo', 950], [c, 'Carta y señalética', 1200],
+    [a, 'Campaña redes sociales (mensual)', 1100], [b, 'Web corporativa · fase 1', 2400], [a, 'Campaña redes sociales (mensual)', 1100],
+    [c, 'Fotografía de producto', 780], [a, 'Campaña redes sociales (mensual)', 1100], [b, 'Web corporativa · fase 2', 1900], [a, 'Rediseño packaging', 1650]
+  ];
+  const seqByYear = {};
+  const seller = { name: 'Alex Martín Ruiz (demo)', tradeName: 'Atlas Estudio', nif: '00000000T', address: 'Calle de Alcalá 100', zip: '28009', city: 'Madrid', province: 'Madrid', email: 'hola@ejemplo.es', phone: '', iban: 'ES00 0000 0000 0000 0000 0000', footer: '' };
+  projects.forEach(([cl, desc, price], i) => {
+    const off = i - (projects.length - 1);
+    const date = monthDate(off, 5);
+    const year = date.slice(0, 4);
+    const seq = (seqByYear[year] = (seqByYear[year] || 0) + 1);
+    const inv = {
+      id: uid(), kind: 'ordinaria', status: 'issued', series: 'F', seq, number: `F${year}-${String(seq).padStart(4, '0')}`,
+      date, opDate: '', dueDate: monthDate(off + 1, 5), paidDate: null, clientId: cl.id,
+      lines: [{ desc, qty: 1, price, discount: 0, ivaRate: 21 }], taxMode: 'normal', irpfRate: 15, recargo: false,
+      note: '', internalNote: '', rectifiesId: null, rectifyReason: '', transactionId: null, issuedAt: now, createdAt: now,
+      buyer: { name: cl.name, nif: cl.nif, kind: cl.kind, address: cl.address, zip: cl.zip, city: cl.city, province: cl.province, country: cl.country, email: '' },
+      seller
+    };
+    const t = invoiceTotals(inv);
+    inv.total = t.total;
+    inv.totals = { base: t.base, iva: t.iva, re: t.re, irpf: t.irpf, total: t.total, byRate: t.byRate };
+    if (off < -1) {
+      const paid = monthDate(off + 1, 3);
+      const tx = { id: uid(), type: 'income', amount: t.total, date: paid, accountId, toAccountId: null, categoryId: income.id, note: `Cobro ${inv.number} · ${cl.name}`, recurringId: null, invoiceId: inv.id, purchaseId: null, createdAt: now, updatedAt: now };
+      s.transactions.push(tx);
+      inv.status = 'paid';
+      inv.paidDate = paid;
+      inv.transactionId = tx.id;
+    }
+    s.invoices.push(inv);
+  });
+  const purchase = (off, day, supplier, nif, kind, concept, base, ivaRate, extra = {}) => {
+    const p = { id: uid(), date: monthDate(off, day), supplier, supplierNif: nif, number: '', concept, kind, base, ivaRate, ivaAmount: null, deductiblePct: 100, ivaNoDeducible: false, irpfRate: 0, accountId, transactionId: null, note: '', createdAt: now, ...extra };
+    p.total = purchaseTotals(p).total;
+    const tx = { id: uid(), type: 'expense', amount: p.total, date: p.date, accountId, toAccountId: null, categoryId: kind === 'reta' ? retaCat.id : bizCat.id, note: `${supplier} · ${concept}`, recurringId: null, invoiceId: null, purchaseId: p.id, createdAt: now, updatedAt: now };
+    s.transactions.push(tx);
+    p.transactionId = tx.id;
+    s.purchases.push(p);
+  };
+  for (let off = -9; off <= 0; off++) {
+    purchase(off, 1, 'Seguridad Social (RETA)', '', 'reta', 'Cuota de autónomos', 380.88, 0);
+    purchase(off, 2, 'Adobe Systems Software Ireland', 'IE6364992H', 'software', 'Creative Cloud', 72.59, 21);
+    purchase(off, 8, 'Movistar', 'A82018474', 'telefono', 'Fibra y móvil (50 % uso profesional)', 49.55, 21, { deductiblePct: 50 });
+    if (off % 3 === 0) purchase(off, 14, 'Gestoría López', 'B12345674', 'gestoria', 'Asesoría fiscal trimestral', 90, 21);
+  }
+  purchase(-6, 20, 'Apple Distribution International', 'IE9700053D', 'material', 'Monitor para el estudio', 450, 21);
+  s.settings.business = { ...s.settings.business, ...seller, startDate: monthDate(-30, 1), irpfRate: 15, retaMonthly: 380.88, retaBase: 1209.15 };
 }
 
 function importState(input) {
@@ -684,6 +1065,10 @@ function importState(input) {
     locale: validLocale(incomingSettings.locale, db.settings.locale),
     theme: THEMES.includes(incomingSettings.theme) ? incomingSettings.theme : db.settings.theme
   };
+  if (PROFILES.includes(incomingSettings.profile)) state.settings.profile = incomingSettings.profile;
+  if (incomingSettings.modules) state.settings.modules = sanitizeModules(incomingSettings.modules, db.settings.modules || defaultModules(state.settings.profile));
+  if (incomingSettings.business && (incomingSettings.business.name || incomingSettings.business.nif)) state.settings.business = sanitizeBusiness(incomingSettings.business);
+  if (incomingSettings.onboarded !== undefined) state.settings.onboarded = Boolean(incomingSettings.onboarded) || Boolean(db.settings.onboarded);
   const used = new Set();
   const keepId = (obj) => {
     let id = clean(obj?.id, 60);
@@ -820,6 +1205,65 @@ function importState(input) {
       state.loans.push(loan);
     } catch { /* préstamo no válido: se descarta */ }
   }
+  // Negocio: clientes, facturas emitidas (se respetan número y estado) y gastos con factura.
+  state.clients = (Array.isArray(input.clients) ? input.clients : []).map((c) => {
+    try {
+      const item = sanitizeClient({ ...c, id: undefined, nif: validateNif(c?.nif).ok ? c.nif : '' }, null);
+      item.id = keepId(c);
+      return item;
+    } catch { return null; }
+  }).filter(Boolean);
+  const clientIds = new Set(state.clients.map((c) => c.id));
+  const txIds = new Set(state.transactions.map((t) => t.id));
+  state.invoices = (Array.isArray(input.invoices) ? input.invoices : []).filter((i) => i && typeof i === 'object').map((i) => {
+    const lines = sanitizeLines(i.lines);
+    const status = ['draft', 'issued', 'paid'].includes(i.status) ? i.status : 'draft';
+    const number = status === 'draft' ? null : text(i.number, 40) || null;
+    return {
+      id: keepId(i),
+      kind: i.kind === 'rectificativa' ? 'rectificativa' : 'ordinaria',
+      status: number ? status : 'draft',
+      series: text(i.series, 6, 'F').toUpperCase(),
+      number,
+      seq: number ? Math.max(1, Math.round(Number(i.seq) || Number(String(number).split('-').pop()) || 1)) : undefined,
+      date: validDate(i.date) ? i.date : todayISO(),
+      opDate: validDate(i.opDate) ? i.opDate : '',
+      dueDate: validDate(i.dueDate) ? i.dueDate : '',
+      paidDate: validDate(i.paidDate) ? i.paidDate : null,
+      clientId: clientIds.has(i.clientId) ? i.clientId : null,
+      lines,
+      taxMode: TAX_MODES[i.taxMode] ? i.taxMode : 'normal',
+      irpfRate: Math.min(47, Math.max(0, Number(i.irpfRate) || 0)),
+      recargo: Boolean(i.recargo),
+      note: text(i.note, 600),
+      internalNote: text(i.internalNote, 300),
+      rectifiesId: i.rectifiesId ? String(i.rectifiesId) : null,
+      rectifyReason: text(i.rectifyReason, 300),
+      seller: i.seller && typeof i.seller === 'object' ? i.seller : null,
+      buyer: i.buyer && typeof i.buyer === 'object' ? i.buyer : null,
+      totals: i.totals && typeof i.totals === 'object' ? i.totals : null,
+      total: invoiceTotals({ lines, taxMode: i.taxMode, irpfRate: i.irpfRate, recargo: i.recargo }).total,
+      transactionId: txIds.has(i.transactionId) ? i.transactionId : null,
+      issuedAt: text(i.issuedAt, 40) || null,
+      createdAt: text(i.createdAt, 40, new Date().toISOString())
+    };
+  });
+  state.purchases = (Array.isArray(input.purchases) ? input.purchases : []).map((p) => {
+    try {
+      const saved = db;
+      db = { ...db, accounts: state.accounts };
+      let item;
+      try { item = sanitizePurchase({ ...p, id: undefined, supplierNif: validateNif(p?.supplierNif).ok ? p.supplierNif : '' }, null); } finally { db = saved; }
+      item.id = keepId(p);
+      item.transactionId = txIds.has(p.transactionId) ? p.transactionId : null;
+      return item;
+    } catch { return null; }
+  }).filter(Boolean);
+  for (const t of state.transactions) {
+    const raw = (input.transactions || []).find((x) => x && x.id === t.id);
+    t.invoiceId = raw && state.invoices.some((i) => i.id === raw.invoiceId) ? raw.invoiceId : null;
+    t.purchaseId = raw && state.purchases.some((p) => p.id === raw.purchaseId) ? raw.purchaseId : null;
+  }
   // Conserva la fecha de última modificación (necesaria para sincronizar).
   for (const col of COLLECTIONS) {
     const rawList = Array.isArray(input[col]) ? input[col] : [];
@@ -835,7 +1279,7 @@ function importState(input) {
     .map((d) => ({ col: d.col, id: clean(d.id, 60), at: clean(d.at, 40) }))
     .slice(-2000);
   state.rev = db.rev;
-  return { state, counts: { accounts: state.accounts.length, categories: state.categories.length, transactions: state.transactions.length, investments: state.investments.length, ops: state.ops.length, recurring: state.recurring.length, goals: state.goals.length, loans: state.loans.length } };
+  return { state, counts: { accounts: state.accounts.length, categories: state.categories.length, transactions: state.transactions.length, investments: state.investments.length, ops: state.ops.length, recurring: state.recurring.length, goals: state.goals.length, loans: state.loans.length, clients: state.clients.length, invoices: state.invoices.length, purchases: state.purchases.length } };
 }
 
 // ---------------------------------------------------------------- sincronización
@@ -920,7 +1364,7 @@ function openPackage(passphrase, pkg) {
 const BACKUP_RE = /^db-[0-9A-Za-z-]+\.json$/;
 function backupCounts(state) {
   const n = (k) => (Array.isArray(state?.[k]) ? state[k].length : 0);
-  return { transactions: n('transactions'), accounts: n('accounts'), investments: n('investments'), loans: n('loans') };
+  return { transactions: n('transactions'), accounts: n('accounts'), investments: n('investments'), loans: n('loans'), invoices: n('invoices') };
 }
 function listBackups() {
   let files = [];
@@ -1192,6 +1636,17 @@ async function handleApi(req, res, pathname) {
     }
     if (body.locale !== undefined) db.settings.locale = validLocale(body.locale, db.settings.locale);
     if (body.autoPrices !== undefined) db.settings.autoPrices = Boolean(body.autoPrices);
+    if (body.profile !== undefined) {
+      if (!PROFILES.includes(body.profile)) throw bad('Perfil no válido.');
+      db.settings.profile = body.profile;
+    }
+    if (body.modules !== undefined) db.settings.modules = sanitizeModules(body.modules, db.settings.modules || defaultModules(db.settings.profile));
+    if (body.onboarded !== undefined) db.settings.onboarded = Boolean(body.onboarded);
+    if (body.business !== undefined) {
+      const next = sanitizeBusiness(body.business, db.settings.business || {});
+      if (next.nif && !validateNif(next.nif).ok) throw bad(`Tu NIF: ${validateNif(next.nif).message}.`);
+      db.settings.business = next;
+    }
     return json(res, 200, commit());
   }
 
@@ -1280,8 +1735,10 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/demo' && method === 'POST') {
     saveBackupNow('antes-de-demo');
     const settings = { ...db.settings };
-    db = demoState();
-    db.settings = settings;
+    const demo = demoState(settings.profile || 'personal');
+    db = demo;
+    // Los datos fiscales de ejemplo solo se usan si aún no has puesto los tuyos.
+    db.settings = { ...settings, business: settings.business?.nif ? settings.business : sanitizeBusiness(demo.settings.business) };
     runRecurring();
     return json(res, 200, commit());
   }
@@ -1293,6 +1750,24 @@ async function handleApi(req, res, pathname) {
     db = defaultState();
     db.settings = settings;
     db.rev = rev;
+    return json(res, 200, commit());
+  }
+
+  const invMatch = pathname.match(/^\/api\/invoices\/([^/]+)\/(issue|pay|unpay|rectify)$/);
+  if (invMatch && method === 'POST') {
+    const inv = db.invoices.find((i) => i.id === decodeURIComponent(invMatch[1]));
+    if (!inv) throw new HttpError(404, 'No existe esa factura.');
+    const body = await readJson(req);
+    const action = invMatch[2];
+    if (action === 'issue') {
+      if (inv.status !== 'draft') throw bad('Esta factura ya está emitida.');
+      issueInvoice(inv);
+    } else if (action === 'pay') payInvoice(inv, body);
+    else if (action === 'unpay') unpayInvoice(inv);
+    else if (action === 'rectify') {
+      const draft = rectifyInvoice(inv);
+      return json(res, 200, { ...commit(), createdId: draft.id });
+    }
     return json(res, 200, commit());
   }
 
@@ -1308,7 +1783,11 @@ async function handleApi(req, res, pathname) {
     item.updatedAt = new Date().toISOString();
     db[col].push(item);
     if (col === 'recurring') runRecurring();
-    return json(res, 200, commit());
+    if (col === 'purchases') linkPurchaseTx(item);
+    if (col === 'invoices' && body.issue) {
+      try { issueInvoice(item); } catch (err) { db.invoices = db.invoices.filter((i) => i.id !== item.id); throw err; }
+    }
+    return json(res, 200, { ...commit(), createdId: item.id });
   }
 
   if ((method === 'PATCH' || method === 'PUT') && id) {
@@ -1325,6 +1804,10 @@ async function handleApi(req, res, pathname) {
     item.updatedAt = new Date().toISOString();
     db[col][index] = item;
     if (col === 'recurring') runRecurring();
+    if (col === 'purchases') linkPurchaseTx(item);
+    if (col === 'invoices' && body.issue && item.status === 'draft') {
+      try { issueInvoice(item); } catch (err) { db[col][index] = prev; throw err; }
+    }
     return json(res, 200, commit());
   }
 
@@ -1345,6 +1828,22 @@ async function handleApi(req, res, pathname) {
       if (db.recurring.some((r) => r.categoryId === id)) throw bad('Esta categoría se usa en movimientos recurrentes. Edítalos o elimínalos primero.');
       for (const l of db.loans) if (l.categoryId === id) l.categoryId = null;
     }
+    if (col === 'invoices' && item.status !== 'draft') {
+      throw bad('Una factura emitida no se puede borrar (la numeración debe ser correlativa). Crea una factura rectificativa.');
+    }
+    if (col === 'clients' && db.invoices.some((i) => i.clientId === id && i.status !== 'draft')) {
+      throw bad('Este cliente tiene facturas emitidas. Puedes editar sus datos, pero no borrarlo.');
+    }
+    if (col === 'clients') for (const i of db.invoices) if (i.clientId === id) i.clientId = null;
+    if (col === 'purchases' && item.transactionId) {
+      db.transactions = db.transactions.filter((t) => t.id !== item.transactionId);
+      recordDeletion('transactions', item.transactionId);
+    }
+    if (col === 'transactions') {
+      for (const i of db.invoices) if (i.transactionId === id) { i.transactionId = null; i.status = 'issued'; i.paidDate = null; }
+      for (const p of db.purchases) if (p.transactionId === id) { p.transactionId = null; p.accountId = null; }
+    }
+    if (col === 'accounts') for (const p of db.purchases) if (p.accountId === id) p.accountId = null;
     db[col] = db[col].filter((x) => x.id !== id);
     recordDeletion(col, id);
     if (col === 'investments') {
@@ -1371,6 +1870,9 @@ function sanitizeByCollection(col, obj, prev, candidateList) {
     case 'recurring': return sanitizeRecurring(obj, prev);
     case 'goals': return sanitizeGoal(obj, prev);
     case 'loans': return sanitizeLoan(obj, prev);
+    case 'clients': return sanitizeClient(obj, prev);
+    case 'invoices': return sanitizeInvoice(obj, prev);
+    case 'purchases': return sanitizePurchase(obj, prev);
     default: throw new HttpError(404, 'Ruta no encontrada.');
   }
 }
