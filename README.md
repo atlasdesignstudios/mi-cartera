@@ -171,6 +171,11 @@ Los que antes había que resolver a mano ya los resuelve la app:
 - **Restaurar una copia**: **Ajustes → Datos → Copias automáticas → Restaurar**. Antes se guarda una copia de lo que tienes ahora, así que se puede deshacer.
 - **Cambiar de ordenador**: **Ajustes → Sincronización cifrada → Crear** en el antiguo y **Abrir → Reemplazar todo** en el nuevo (o copia la carpeta `data/`).
 
+## Novedades de la 1.7.1
+
+- Si el servicio de cotizaciones no responde al crear una inversión, ya no se bloquea: se crea igualmente, se valora a lo que pagaste y el precio se carga solo (se reintenta cada minuto). El formulario muestra un botón «Reintentar».
+- La versión web reintenta los intermediarios públicos antes de rendirse y, si fallan, usa el último precio bueno.
+
 ## Novedades de la 1.7
 
 - **Fuentes oficiales y más estables**: cripto en directo desde Coinbase, acciones de EE. UU. en directo desde Finnhub (clave gratuita) y cambio de divisas del Banco Central Europeo. Yahoo queda solo como respaldo para bolsas europeas y fondos.

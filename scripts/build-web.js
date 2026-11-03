@@ -178,15 +178,19 @@ async function marketFetchJson(url) {
     try { return await tryRoute(custom, url); } catch (err) { if (err.final) throw err; }
   }
   // Se prueba primero el intermediario que funcionó la última vez y, si falla, los demás a la vez.
+  // Los intermediarios públicos fallan a ratos: si ninguno responde, se espera un momento y se reintenta una vez.
   try { return await tryRoute(MARKET_ROUTES[marketRoute], url); } catch (err) { if (err.final) throw err; }
-  const others = MARKET_ROUTES.map((r, i) => ({ r, i })).filter(({ i }) => i !== marketRoute);
-  try {
-    return await Promise.any(others.map(({ r, i }) => tryRoute(r, url).then((body) => { marketRoute = i; return body; })));
-  } catch (agg) {
-    const fin = (agg.errors || []).find((e) => e.final);
-    if (fin) throw fin;
-    throw Object.assign(new Error('No se pudo conectar con el servicio de cotizaciones. Revisa tu conexión o inténtalo en unos minutos.'), { network: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 1500));
+    const routes = MARKET_ROUTES.map((r, i) => ({ r, i })).filter(({ i }) => attempt || i !== marketRoute);
+    try {
+      return await Promise.any(routes.map(({ r, i }) => tryRoute(r, url).then((body) => { marketRoute = i; return body; })));
+    } catch (agg) {
+      const fin = (agg.errors || []).find((e) => e.final);
+      if (fin) throw fin;
+    }
   }
+  throw Object.assign(new Error('El intermediario público que usa la web para consultar Yahoo Finance no responde ahora mismo.'), { network: true });
 }
 // SHA-256 síncrono (el PIN solo protege este navegador).
 function sha256Hex(text) {
