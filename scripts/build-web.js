@@ -50,6 +50,8 @@ const overrides = String.raw`
 function writeDb(state) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
   catch { throw new HttpError(507, 'No queda espacio en el navegador. Exporta una copia y borra datos antiguos.'); }
+  const name = 'db-' + todayISO() + '.json';
+  if (!readBackupStore().some((b) => b.name === name)) { try { addWebBackup(name, 'daily', state); } catch { /* opcional */ } }
 }
 function loadDb() {
   const base = defaultState();
@@ -65,8 +67,70 @@ function loadDb() {
     ...base, ...parsed, settings,
     accounts: list('accounts', base.accounts), categories: list('categories', base.categories),
     transactions: list('transactions'), investments: list('investments'), ops: list('ops'),
-    recurring: list('recurring'), goals: list('goals'), rev: Number(parsed.rev) || 0
+    recurring: list('recurring'), goals: list('goals'), loans: list('loans'), deleted: list('deleted'),
+    rev: Number(parsed.rev) || 0
   };
+}
+// Copias automáticas dentro del navegador: una diaria (5 días) y las de seguridad (5).
+const BK_KEY = 'micartera.web.backups.v1';
+function readBackupStore() {
+  try { const list = JSON.parse(localStorage.getItem(BK_KEY) || '[]'); return Array.isArray(list) ? list : []; } catch { return []; }
+}
+function writeBackupStore(list) {
+  let items = list.slice();
+  while (items.length) {
+    try { localStorage.setItem(BK_KEY, JSON.stringify(items)); return; } catch { items = items.slice(1); }
+  }
+  try { localStorage.removeItem(BK_KEY); } catch { /* nada */ }
+}
+function pruneBackups(list) {
+  const daily = list.filter((b) => b.kind === 'daily').slice(-5);
+  const other = list.filter((b) => b.kind !== 'daily').slice(-5);
+  return [...daily, ...other].sort((a, b) => a.at.localeCompare(b.at));
+}
+function addWebBackup(name, kind, state) {
+  const list = readBackupStore().filter((b) => b.name !== name);
+  list.push({ name, kind, at: new Date().toISOString(), data: JSON.parse(JSON.stringify(state)) });
+  writeBackupStore(pruneBackups(list));
+}
+function listBackups() {
+  return readBackupStore().map((b) => ({
+    name: b.name, at: b.at, kind: b.kind, size: JSON.stringify(b.data || {}).length, counts: backupCounts(b.data)
+  })).sort((a, b) => b.at.localeCompare(a.at));
+}
+function readBackup(name) {
+  const found = readBackupStore().find((b) => b.name === name);
+  if (!found) throw new HttpError(404, 'No se encontró esa copia.');
+  return found.data;
+}
+function saveBackupNow(label = 'manual') {
+  const d = new Date();
+  const name = 'db-' + label + '-' + todayISO() + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + '.json';
+  addWebBackup(name, label === 'manual' ? 'manual' : 'safety', db);
+  return name;
+}
+function networkInfo() { return { web: true }; }
+function sealPackage() { throw bad('El cifrado se hace directamente en el navegador.'); }
+function openPackage() { throw bad('El descifrado se hace directamente en el navegador.'); }
+// En la web solo se pueden consultar criptomonedas (CoinGecko permite peticiones desde el navegador).
+const COINGECKO = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', ADA: 'cardano', XRP: 'ripple', DOT: 'polkadot', DOGE: 'dogecoin', BNB: 'binancecoin', LTC: 'litecoin', AVAX: 'avalanche-2', LINK: 'chainlink', MATIC: 'matic-network', USDT: 'tether', USDC: 'usd-coin', TRX: 'tron', XLM: 'stellar' };
+function quoteSymbolFor(inv) {
+  return inv.type === 'crypto' && (inv.quoteSymbol || inv.symbol) ? (inv.quoteSymbol || inv.symbol) : '';
+}
+async function fetchQuote(inv, target) {
+  const raw = String(inv.quoteSymbol || inv.symbol || '').toUpperCase().replace(/-[A-Z]{3}$/, '');
+  const id = COINGECKO[raw] || raw.toLowerCase();
+  const cur = String(target || 'EUR').toLowerCase();
+  let response;
+  try {
+    response = await nativeFetch('https://api.coingecko.com/api/v3/simple/price?ids=' + encodeURIComponent(id) + '&vs_currencies=' + cur, { signal: AbortSignal.timeout(10000) });
+  } catch { throw new Error('Sin conexión con CoinGecko.'); }
+  if (response.status === 429) throw new Error('CoinGecko está limitando las consultas. Prueba en un minuto.');
+  if (!response.ok) throw new Error('CoinGecko respondió ' + response.status + '.');
+  const body = await response.json().catch(() => null);
+  const price = Number(body?.[id]?.[cur]);
+  if (!(price > 0)) throw new Error('CoinGecko no conoce ' + raw + '.');
+  return { price, source: 'CoinGecko', symbol: raw };
 }
 // SHA-256 síncrono (el PIN solo protege este navegador).
 function sha256Hex(text) {

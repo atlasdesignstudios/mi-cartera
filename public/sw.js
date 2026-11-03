@@ -1,9 +1,9 @@
-// Service worker mínimo: red primero, caché como respaldo sin conexión.
-const CACHE = 'micartera-v4';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'fonts/inter-latin.woff2'];
+// Service worker mínimo: red primero (sin caché HTTP), caché propia solo como respaldo sin conexión.
+const CACHE = 'micartera-v5';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'fonts/inter-latin.woff2', 'vendor/qrcode.js'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).catch(() => {}));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).catch(() => {}));
   self.skipWaiting();
 });
 
@@ -22,7 +22,7 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.includes('/api/')) return;
 
   event.respondWith(
-    fetch(request)
+    fetch(request, { cache: 'no-cache' })
       .then((response) => {
         if (response && response.ok) {
           const copy = response.clone();

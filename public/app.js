@@ -2,6 +2,7 @@
 'use strict';
 
 const STORAGE_KEY = 'micartera.state.v1';
+const APP_VERSION = '1.3.0';
 // En la versión web (GitHub Pages) no hay servidor: los datos viven en este navegador.
 const WEB = Boolean(globalThis.MC_WEB);
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'MXN', 'ARS', 'COP', 'CLP', 'PEN', 'BRL', 'UYU', 'JPY'];
@@ -55,6 +56,7 @@ const NAV = [
   { id: 'presupuestos', label: 'Presupuestos', icon: 'target' },
   { id: 'objetivos', label: 'Objetivos', icon: 'flag' },
   { id: 'inversiones', label: 'Inversiones', icon: 'trend' },
+  { id: 'prestamos', label: 'Préstamos', icon: 'bank' },
   { id: 'cuentas', label: 'Cuentas', icon: 'wallet' },
   { id: 'informes', label: 'Informes', icon: 'chart' },
   { id: 'ajustes', label: 'Ajustes', icon: 'settings' }
@@ -62,7 +64,7 @@ const NAV = [
 const MORE_NAV = { id: 'mas', label: 'Más', icon: 'grid' };
 const ROUTES = [...NAV.map((n) => n.id), 'mas'];
 const BOTTOM_NAV = ['resumen', 'movimientos', 'inversiones', 'informes', 'mas'];
-const MORE_VIEWS = ['mas', 'cuentas', 'presupuestos', 'recurrentes', 'objetivos', 'ajustes'];
+const MORE_VIEWS = ['mas', 'cuentas', 'presupuestos', 'recurrentes', 'objetivos', 'prestamos', 'ajustes'];
 const FREQ_LABELS = { weekly: 'Semanal', monthly: 'Mensual', quarterly: 'Trimestral', yearly: 'Anual' };
 const FREQ_PER_MONTH = { weekly: 52 / 12, monthly: 1, quarterly: 1 / 3, yearly: 1 / 12 };
 
@@ -104,6 +106,10 @@ const ICONS = {
   grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
   skip: '<path d="M5 5v14l10-7z"/><path d="M19 5v14"/>',
+  bank: '<path d="M3 10 12 4l9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 21h18"/>',
+  shield: '<path d="M12 3 5 6v5c0 4.5 3 8.2 7 10 4-1.8 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  sync: '<path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.7"/><path d="M20 4v4.7h-4.7"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15.3"/><path d="M4 20v-4.7h4.7"/>',
   sparkles: '<path d="m12 3 1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z"/><path d="m18.5 15 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>'
 };
 
@@ -288,7 +294,7 @@ function portfolioTotals(holdings = computeHoldings()) {
   return { value, cost, realized, pnl, pnlPct: cost > 0 ? pnl / cost : 0 };
 }
 function netWorth() {
-  return round(totalCash() + portfolioTotals().value);
+  return round(totalCash() + portfolioTotals().value - totalDebt());
 }
 function monthStats(key) {
   let income = 0;
@@ -593,6 +599,16 @@ function startPolling() {
     } catch { /* sin conexión temporal */ }
   }, 15000);
 }
+// Al volver a la app (cambiar de pestaña o desbloquear el móvil) se recargan los datos al momento.
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden || !store.data) return;
+  try {
+    const response = await fetch('api/state', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json();
+    if (data.rev !== store.data.rev || store.offline) { setData(data); render(); }
+  } catch { /* sin conexión */ }
+});
 async function boot() {
   initChrome();
   document.getElementById('lockForm')?.addEventListener('submit', unlock);
@@ -609,9 +625,14 @@ async function boot() {
     showApp();
     render();
     startPolling();
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
+    setupServiceWorker();
+    if (store.session.version && store.session.version !== APP_VERSION && !sessionStorage.getItem('mc-updated')) {
+      // El servidor ya va por otra versión: el navegador tenía archivos antiguos.
+      sessionStorage.setItem('mc-updated', '1');
+      forceUpdate();
+      return;
     }
+    setTimeout(maybeAutoRefreshPrices, 1500);
   } catch (err) {
     if (!document.getElementById('lock')?.hidden) return;
     const cached = readCache();
@@ -810,7 +831,8 @@ function viewResumen() {
   const holdings = computeHoldings();
   const portfolio = portfolioTotals(holdings);
   const cash = totalCash();
-  const worth = round(cash + portfolio.value);
+  const debt = totalDebt();
+  const worth = round(cash + portfolio.value - debt);
   const spend = spendingByCategory(now);
   const spendTotal = sum(spend, (s) => s.value);
   const recent = recentTransactions(5);
@@ -831,6 +853,7 @@ function viewResumen() {
       <div class="hero-meta">
         <span><span class="dot cash"></span>Efectivo <b>${esc(money(cash))}</b></span>
         <span><span class="dot inv"></span>Invertido <b>${esc(money(portfolio.value))}</b></span>
+        ${debt > 0 ? `<a class="hero-debt" href="#/prestamos"><span class="dot debt"></span>Deudas <b>−${esc(money(debt))}</b></a>` : ''}
       </div>
       <div class="hero-actions">
         <button class="btn btn-light" type="button" data-action="new-tx" data-type="expense">${icon('plus', 16)} Añadir movimiento</button>
@@ -1123,6 +1146,7 @@ function viewInversiones() {
   <div class="viewhead">
     <div><h1>Inversiones</h1><p>Tu cartera, sus aportaciones y lo que está ganando.</p></div>
     <div class="head-actions">
+      ${(store.data.investments || []).some(quotable) ? `<button class="btn btn-ghost" type="button" data-action="refresh-prices" title="Consulta los precios actuales en internet">${icon('refresh', 16)} Cotizaciones</button>` : ''}
       <button class="btn btn-ghost" type="button" data-action="new-op">${icon('plus', 16)} Operación</button>
       <button class="btn btn-primary" type="button" data-action="new-investment">${icon('plus', 16)} Nueva inversión</button>
     </div>
@@ -1183,7 +1207,7 @@ function viewCuentas() {
   <div class="statgrid">
     ${statCard('Efectivo disponible', bigMoney(cash), '<span>Suma de todas tus cuentas</span>', 'income', 'wallet')}
     ${statCard('Invertido', bigMoney(portfolio.value), `<span>${esc(percent(portfolio.pnlPct))} de rentabilidad latente</span>`, 'net', 'trend')}
-    ${statCard('Patrimonio neto', bigMoney(cash + portfolio.value), '<span>Efectivo + valor de la cartera</span>', 'net', 'coins')}
+    ${statCard('Patrimonio neto', bigMoney(netWorth()), `<span>${(store.data.loans || []).length ? 'Efectivo + cartera − préstamos' : 'Efectivo + valor de la cartera'}</span>`, 'net', 'coins')}
   </div>
 
   ${accounts.length ? `<div class="account-grid">
@@ -1554,7 +1578,7 @@ function viewInformes() {
   const worthPoints = elapsed.map((key) => {
     const end = key === nowKey ? todayISO() : monthEnd(key);
     const invested = key === nowKey ? portfolioTotals().value : holdingsAt(end);
-    return { label: shortMonth(key), title: monthLabel(key), value: round(cashAt(end) + invested) };
+    return { label: shortMonth(key), title: monthLabel(key), value: round(cashAt(end) + invested - totalDebt(end)) };
   });
   const worthStart = worthPoints[0]?.value || 0;
   const worthEnd = worthPoints[worthPoints.length - 1]?.value || 0;
@@ -1685,6 +1709,7 @@ function viewMas() {
     { id: 'presupuestos', icon: 'target', title: 'Presupuestos', text: budgets.length ? `${budgets.length} límites${over ? ` · ${over} excedidos` : ''}` : 'Sin límites definidos' },
     { id: 'recurrentes', icon: 'repeat', title: 'Recurrentes', text: (store.data.recurring || []).length ? `${money(totals.expense, { decimals: 0 })} fijos al mes` : 'Automatiza nómina y recibos' },
     { id: 'objetivos', icon: 'flag', title: 'Objetivos', text: goals.length ? `${goals.length} objetivos · ${goals.filter((g) => g.reached).length} conseguidos` : 'Ahorra con propósito' },
+    { id: 'prestamos', icon: 'bank', title: 'Préstamos', text: (store.data.loans || []).length ? `${(store.data.loans || []).length} · ${money(totalDebt(), { decimals: 0 })} pendientes` : 'Hipotecas y préstamos' },
     { id: 'informes', icon: 'chart', title: 'Informes', text: 'Tu año en números' },
     { id: 'ajustes', icon: 'settings', title: 'Ajustes', text: 'Tema, PIN, copias y categorías' }
   ];
@@ -1778,12 +1803,59 @@ function viewAjustes() {
         </div>
       </div>
       <div class="setting-row">
-        <div><h3>Importar copia</h3><p>Reemplaza los datos actuales.${WEB ? '' : ' Se guarda una copia diaria automática.'}</p></div>
+        <div><h3>Copias automáticas</h3><p>Una al día y otra antes de cada cambio grande. Restaura cualquiera con un clic.</p></div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="backups">${icon('refresh', 14)} Ver y restaurar</button>
+      </div>
+      <div class="setting-row">
+        <div><h3>Importar copia</h3><p>Reemplaza los datos actuales. Antes se guarda una copia de seguridad.</p></div>
         <button class="btn btn-ghost btn-sm" type="button" data-action="import-json">${icon('upload', 14)} Importar</button>
         <input type="file" id="importFile" accept="application/json,.json" hidden>
       </div>
       ${WEB ? '' : `<div class="path-box" title="Carpeta de datos">${esc(dataDir || 'data/')}</div>
       <p class="tiny" style="margin-top:8px">Copias automáticas en <b>data/backups</b> (últimos 14 días).</p>`}
+    </section>
+
+    <section class="card setting-card">
+      <h2>Tus dispositivos</h2>
+      <p>Usa Mi Cartera en el móvil, en otro ordenador o en ambos, sin subir tus datos a ninguna nube.</p>
+      <div class="setting-row">
+        <div><h3>Abrir en el móvil</h3><p>${WEB ? 'Código QR de esta página.' : 'Dirección y código QR para entrar desde el móvil con la misma Wi-Fi.'}</p></div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="phone">${icon('phone', 14)} Ver código</button>
+      </div>
+      <div class="setting-row">
+        <div><h3>Sincronización cifrada</h3><p>Crea un paquete protegido con contraseña y ábrelo en el otro dispositivo para combinar los datos.</p></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" type="button" data-action="sync-export">${icon('shield', 14)} Crear</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-action="sync-import">${icon('sync', 14)} Abrir</button>
+        </div>
+        <input type="file" id="syncFile" accept=".mcsync,application/json" hidden>
+      </div>
+      <details class="howto">
+        <summary>Cómo cambiar de ordenador</summary>
+        <ol class="steps">
+          <li>En el ordenador antiguo: <b>Crear</b> paquete cifrado${WEB ? '' : ' (o copia la carpeta <b>data</b> entera)'}.</li>
+          <li>En el nuevo: ${WEB ? 'abre esta misma página' : 'copia la carpeta de la app y abre <b>iniciar.bat</b>'}.</li>
+          <li>Ajustes → Sincronización cifrada → <b>Abrir</b> → elige <b>Reemplazar todo</b>.</li>
+        </ol>
+        <p class="tiny">Para usar dos dispositivos a la vez, elige <b>Combinar</b> en los dos sentidos de vez en cuando: gana el cambio más reciente y los borrados se respetan.</p>
+      </details>
+    </section>
+
+    <section class="card setting-card">
+      <h2>Cotizaciones</h2>
+      <p>${WEB ? 'En la versión web solo se pueden actualizar criptomonedas (CoinGecko). Las bolsas no permiten consultas desde el navegador: usa la app del ordenador para acciones y ETF.' : 'Actualiza el precio de acciones, ETF y cripto desde Yahoo Finance. Para fondos, indica su símbolo de cotización.'}</p>
+      <div class="setting-row">
+        <div><h3>Precios automáticos</h3><p>Una vez al día, al abrir la app. Desactivado, Mi Cartera no se conecta a internet.</p></div>
+        <div class="seg" role="group" aria-label="Precios automáticos">
+          <button type="button" data-action="auto-prices" data-value="off" class="${s.autoPrices ? '' : 'active'}">No</button>
+          <button type="button" data-action="auto-prices" data-value="on" class="${s.autoPrices ? 'active' : ''}">Sí</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div><h3>Actualizar ahora</h3><p>${s.pricesRefreshedAt ? `Última consulta: ${esc(new Date(s.pricesRefreshedAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}.` : 'Aún no se ha consultado ninguna cotización.'}</p></div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="refresh-prices">${icon('refresh', 14)} Actualizar</button>
+      </div>
+      <p class="tiny" style="margin-top:8px">Solo se envía el símbolo (por ejemplo IWDA.AS). Nunca tus importes ni ningún dato personal.</p>
     </section>
 
     <section class="card setting-card">
@@ -1798,8 +1870,8 @@ function viewAjustes() {
         <button class="btn btn-ghost btn-sm" type="button" data-action="reset" style="color:var(--danger)">${icon('trash', 14)} Borrar todo</button>
       </div>
       <div class="setting-row">
-        <div><h3>Versión</h3><p>${esc(store.session?.version || '1.1.0')} · datos rev ${esc(store.data.rev)}</p></div>
-        <span class="badge badge--soft">${WEB ? 'Versión web' : '100% local'}</span>
+        <div><h3>Versión</h3><p>${esc(APP_VERSION)} · datos rev ${esc(store.data.rev)} · ${WEB ? 'versión web' : '100% local'}</p></div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="force-update" title="Descarga de nuevo la app si ves datos o pantallas antiguas">${icon('refresh', 14)} Forzar actualización</button>
       </div>
     </section>
   </div>
@@ -2250,6 +2322,7 @@ function openInvestmentModal(investment = null) {
           ${Object.entries(INVEST_TYPES).map(([value, meta]) => `<option value="${value}"${type === value ? ' selected' : ''}>${esc(meta.label)}</option>`).join('')}
         </select></div>
       </div>
+      <div class="field"><span>Símbolo de cotización <span class="hint">(opcional, para actualizar el precio solo)</span></span><input name="quoteSymbol" maxlength="24" placeholder="${WEB ? 'BTC, ETH… (solo cripto en la web)' : 'Ej. IWDA.AS · AAPL · SAN.MC · BTC-EUR'}" value="${esc(investment?.quoteSymbol || '')}" autocapitalize="characters" spellcheck="false"></div>
       <div class="form-grid">
         <div class="field"><span>Precio actual por unidad</span><input name="currentPrice" type="number" min="0" step="any" inputmode="decimal" value="${investment ? esc(investment.currentPrice) : ''}" placeholder="0,00" required></div>
         <div class="field"><span>Última actualización</span><input name="priceDate" type="date" value="${esc(investment?.priceUpdatedAt || todayISO())}"></div>
@@ -2271,6 +2344,7 @@ function openInvestmentModal(investment = null) {
       const payload = {
         name: String(formData.get('name') || '').trim(),
         symbol: String(formData.get('symbol') || '').trim(),
+        quoteSymbol: String(formData.get('quoteSymbol') || '').trim().toUpperCase(),
         type: formData.get('type'),
         currentPrice: payloadNumber(formData.get('currentPrice')),
         priceUpdatedAt: formData.get('priceDate') || todayISO(),
@@ -2981,6 +3055,49 @@ document.addEventListener('click', async (event) => {
       case 'pin':
         openPinModal();
         break;
+      case 'new-loan':
+        openLoanModal();
+        break;
+      case 'edit-loan': {
+        const loan = byId(store.data.loans || [], el.dataset.id);
+        if (loan) openLoanModal(loan);
+        break;
+      }
+      case 'loan-table': {
+        const loan = byId(store.data.loans || [], el.dataset.id);
+        if (loan) openLoanTableModal(loan);
+        break;
+      }
+      case 'loan-extra': {
+        const loan = byId(store.data.loans || [], el.dataset.id);
+        if (loan) openLoanExtraModal(loan);
+        break;
+      }
+      case 'refresh-prices':
+        el.disabled = true;
+        try { await refreshPricesNow(); } finally { el.disabled = false; }
+        break;
+      case 'auto-prices':
+        await api('PATCH', 'api/settings', { autoPrices: el.dataset.value === 'on' });
+        render();
+        toast(el.dataset.value === 'on' ? 'Precios automáticos activados' : 'Precios automáticos desactivados');
+        if (el.dataset.value === 'on') maybeAutoRefreshPrices();
+        break;
+      case 'phone':
+        await openPhoneModal();
+        break;
+      case 'backups':
+        await openBackupsModal();
+        break;
+      case 'sync-export':
+        openSyncExportModal();
+        break;
+      case 'sync-import':
+        document.getElementById('syncFile')?.click();
+        break;
+      case 'force-update':
+        await forceUpdate();
+        break;
       case 'logout':
         await fetch('api/logout', { method: 'POST', credentials: 'same-origin' });
         store.data = null;
@@ -3063,6 +3180,11 @@ document.addEventListener('change', async (event) => {
       render();
       toast(`Moneda cambiada a ${target.value}`);
     }
+    if (target.id === 'syncFile') {
+      const file = target.files?.[0];
+      target.value = '';
+      if (file) openSyncImportModal(file);
+    }
     if (target.id === 'importFile') {
       const file = target.files?.[0];
       target.value = '';
@@ -3073,6 +3195,648 @@ document.addEventListener('change', async (event) => {
   }
 });
 
+/* ---------------------------------------------------------------- préstamos: cálculos */
+const LOAN_TYPES = {
+  mortgage: { label: 'Hipoteca', icon: '🏠', category: 'Vivienda' },
+  personal: { label: 'Préstamo personal', icon: '💳', category: 'Otros gastos' },
+  car: { label: 'Coche', icon: '🚗', category: 'Transporte' },
+  student: { label: 'Estudios', icon: '🎓', category: 'Educación' },
+  other: { label: 'Otro', icon: '📄', category: 'Otros gastos' }
+};
+function loanPayment(balance, monthlyRate, months) {
+  if (months <= 0) return balance;
+  if (!monthlyRate) return balance / months;
+  return (balance * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -months));
+}
+function addMonthsISO(iso, n, anchorDay) {
+  const d = parseISO(iso);
+  const target = new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const max = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(anchorDay || d.getDate(), max));
+  return isoDate(target);
+}
+/** Cuadro de amortización (sistema francés) con amortizaciones anticipadas. */
+function loanSchedule(loan, extras = loan.extraPayments || []) {
+  const r = (Number(loan.annualRate) || 0) / 1200;
+  const term = Math.max(1, Math.round(Number(loan.termMonths) || 1));
+  const anchor = parseISO(loan.startDate).getDate();
+  const queue = [...extras].filter((e) => Number(e.amount) > 0).sort((a, b) => a.date.localeCompare(b.date));
+  let balance = Number(loan.principal) || 0;
+  let payment = loanPayment(balance, r, term);
+  let qi = 0;
+  const rows = [];
+  for (let i = 0; i < term && balance > 0.005; i += 1) {
+    const date = addMonthsISO(loan.startDate, i, anchor);
+    let extra = 0;
+    while (qi < queue.length && queue[qi].date <= date && balance > 0.005) {
+      const e = queue[qi++];
+      const amount = Math.min(Number(e.amount), balance);
+      balance -= amount;
+      extra += amount;
+      if (e.mode === 'payment' && balance > 0.005) payment = loanPayment(balance, r, term - i);
+    }
+    if (balance <= 0.005) {
+      rows.push({ n: i + 1, date, payment: 0, interest: 0, capital: 0, extra, balance: 0 });
+      balance = 0;
+      break;
+    }
+    const interest = balance * r;
+    let capital = payment - interest;
+    if (capital > balance || i === term - 1) capital = balance;
+    balance -= capital;
+    rows.push({ n: i + 1, date, payment: capital + interest, interest, capital, extra, balance: Math.max(0, balance) });
+  }
+  const totalInterest = sum(rows, (x) => x.interest);
+  const last = rows[rows.length - 1];
+  return { rows, totalInterest, endDate: last?.date || loan.startDate, months: rows.filter((x) => x.payment > 0).length, initialPayment: loanPayment(Number(loan.principal) || 0, r, term) };
+}
+function loanStatus(loan, asOf = todayISO()) {
+  const plan = loanSchedule(loan);
+  const paidRows = plan.rows.filter((x) => x.date <= asOf);
+  const extrasPaid = sum((loan.extraPayments || []).filter((e) => e.date <= asOf), (e) => e.amount);
+  const capitalPaid = sum(paidRows, (x) => x.capital);
+  const pending = round(Math.max(0, (Number(loan.principal) || 0) - capitalPaid - extrasPaid));
+  const interestPaid = round(sum(paidRows, (x) => x.interest));
+  const next = plan.rows.find((x) => x.date > asOf && x.payment > 0) || null;
+  const remainingRows = plan.rows.filter((x) => x.date > asOf && x.payment > 0);
+  const started = asOf >= addMonthsISO(loan.startDate, -1, parseISO(loan.startDate).getDate());
+  return {
+    plan,
+    pending: started ? pending : 0,
+    interestPaid,
+    interestLeft: round(plan.totalInterest - interestPaid),
+    next,
+    payment: next ? round(next.payment) : 0,
+    remaining: remainingRows.length,
+    paidCount: paidRows.filter((x) => x.payment > 0).length,
+    done: !next && pending <= 0.005,
+    pct: loan.principal > 0 ? 1 - pending / loan.principal : 1
+  };
+}
+function totalDebt(asOf = todayISO()) {
+  return round(sum(store.data?.loans || [], (l) => loanStatus(l, asOf).pending));
+}
+function monthsText(n) {
+  const years = Math.floor(n / 12);
+  const months = n % 12;
+  const parts = [];
+  if (years) parts.push(`${years} ${years === 1 ? 'año' : 'años'}`);
+  if (months || !years) parts.push(`${months} ${months === 1 ? 'mes' : 'meses'}`);
+  return parts.join(' y ');
+}
+function monthYear(iso) {
+  return parseISO(iso).toLocaleDateString(locale(), { month: 'long', year: 'numeric' });
+}
+
+/* ---------------------------------------------------------------- vista: préstamos */
+function loanCard(loan) {
+  const st = loanStatus(loan);
+  const meta = LOAN_TYPES[loan.type] || LOAN_TYPES.other;
+  const pct = clamp(st.pct, 0, 1);
+  return `<article class="card goal loan" style="--c:${tone(loan.color || '#64748b')}">
+    <div class="goal-head">
+      <span class="goal-icon" style="background:var(--surface-2)">${esc(meta.icon)}</span>
+      <div class="goal-title"><h3>${esc(loan.name)}</h3><span>${esc(meta.label)} · TIN ${esc(String(loan.annualRate).replace('.', ','))} %</span></div>
+      <button class="icon-btn" type="button" data-action="edit-loan" data-id="${esc(loan.id)}" aria-label="Editar ${esc(loan.name)}">${icon('edit', 17)}</button>
+    </div>
+    <div class="loan-label">Pendiente</div>
+    <div class="goal-amounts"><b>${esc(money(st.pending, { decimals: 0 }))}</b><span>de ${esc(money(loan.principal, { decimals: 0 }))}</span><em>${esc(percent(pct, 0))} pagado</em></div>
+    <div class="progress goal-bar${st.done ? ' done' : ''}"><i style="width:${(pct * 100).toFixed(1)}%"></i></div>
+    <dl class="loan-facts">
+      <div><dt>Cuota</dt><dd>${st.done ? '—' : esc(money(st.payment))}</dd></div>
+      <div><dt>Próximo pago</dt><dd>${st.next ? esc(dateLabel(st.next.date)) : 'Pagado'}</dd></div>
+      <div><dt>Termina</dt><dd>${esc(monthYear(st.plan.endDate))}${st.remaining ? ` <small>${esc(monthsText(st.remaining))}</small>` : ''}</dd></div>
+      <div><dt>Intereses pendientes</dt><dd>${esc(money(st.interestLeft, { decimals: 0 }))}</dd></div>
+    </dl>
+    ${loan.recurringId ? `<p class="goal-note">${icon('repeat', 13)} La cuota se apunta sola cada mes.</p>` : ''}
+    <div class="holding-actions">
+      <button class="btn btn-sm btn-ghost" type="button" data-action="loan-table" data-id="${esc(loan.id)}">${icon('list', 14)} Cuadro</button>
+      ${st.done ? '' : `<button class="btn btn-sm btn-ghost" type="button" data-action="loan-extra" data-id="${esc(loan.id)}">${icon('sparkles', 14)} Amortizar</button>`}
+    </div>
+  </article>`;
+}
+function viewPrestamos() {
+  const loans = [...(store.data.loans || [])];
+  const states = loans.map((l) => ({ loan: l, st: loanStatus(l) })).sort((a, b) => b.st.pending - a.st.pending);
+  const debt = round(sum(states, (x) => x.st.pending));
+  const monthly = round(sum(states, (x) => x.st.payment));
+  const interestLeft = round(sum(states, (x) => x.st.interestLeft));
+  const income = monthStats(addMonths(monthKey(todayISO()), -1)).income || monthStats(monthKey(todayISO())).income;
+  const effort = income > 0 ? monthly / income : 0;
+  return `
+  <div class="viewhead">
+    <div><h1>Préstamos</h1><p>Hipotecas y préstamos: cuánto debes, cuánto pagas de intereses y cuándo terminas.</p></div>
+    <div class="head-actions"><button class="btn btn-primary" type="button" data-action="new-loan">${icon('plus', 16)} Nuevo préstamo</button></div>
+  </div>
+  ${loans.length ? `
+  <div class="statgrid">
+    ${statCard('Deuda pendiente', bigMoney(debt), `<span>${loans.length} ${loans.length === 1 ? 'préstamo' : 'préstamos'} · se resta de tu patrimonio</span>`, 'expense', 'bank')}
+    ${statCard('Cuotas al mes', bigMoney(monthly), income > 0 ? `<span>${esc(percent(effort, 0))} de tus ingresos${effort > 0.35 ? ' · por encima del 35 % recomendado' : ''}</span>` : '<span>Suma de las próximas cuotas</span>', 'net', 'calendar')}
+    ${statCard('Intereses por pagar', bigMoney(interestLeft), '<span>Lo que te costará la deuda si no amortizas</span>', 'income', 'coins')}
+  </div>
+  <div class="goal-grid">${states.map((x) => loanCard(x.loan)).join('')}</div>
+  <p class="tiny" style="text-align:center">Cálculo con el sistema francés (cuota constante), el habitual en España. Si tu banco usa otro redondeo puede haber diferencias de céntimos.</p>` : `<section class="card"><div class="empty">
+    <span class="empty-icon">🏦</span>
+    <h3>Sin préstamos ni hipotecas</h3>
+    <p>Añade tu hipoteca o un préstamo para ver el capital pendiente, los intereses que te quedan y cuánto ahorras si amortizas antes.</p>
+    <button class="btn btn-primary btn-sm" type="button" data-action="new-loan">${icon('plus', 14)} Añadir préstamo</button>
+  </div></section>`}`;
+}
+
+/* ---------------------------------------------------------------- modal: préstamo */
+function expenseCategoryOptions(selected) {
+  return store.data.categories.filter((c) => c.kind === 'expense')
+    .map((c) => `<option value="${esc(c.id)}"${c.id === selected ? ' selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('');
+}
+function accountOptions(selected, allowEmpty = false) {
+  return (allowEmpty ? '<option value="">Sin cuenta</option>' : '') + store.data.accounts
+    .map((a) => `<option value="${esc(a.id)}"${a.id === selected ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
+}
+function defaultLoanCategory(type) {
+  const name = (LOAN_TYPES[type] || LOAN_TYPES.other).category;
+  return store.data.categories.find((c) => c.kind === 'expense' && c.name === name)?.id
+    || store.data.categories.find((c) => c.kind === 'expense')?.id || '';
+}
+/** Mantiene la cuota recurrente alineada con el cuadro de amortización. */
+async function syncLoanRecurring(loanId) {
+  const loan = byId(store.data.loans || [], loanId);
+  if (!loan?.recurringId) return;
+  const rule = byId(store.data.recurring || [], loan.recurringId);
+  if (!rule) return;
+  const st = loanStatus(loan);
+  const patch = {};
+  if (st.next && Math.abs(round(st.next.payment) - rule.amount) >= 0.01) patch.amount = round(st.next.payment);
+  if (st.plan.endDate !== rule.endDate && st.plan.endDate >= rule.startDate) patch.endDate = st.plan.endDate;
+  if (!st.next) patch.active = false;
+  if (Object.keys(patch).length) await api('PATCH', `api/recurring/${rule.id}`, patch);
+}
+async function createLoanRecurring(loan, accountId, categoryId) {
+  const st = loanStatus(loan);
+  if (!st.next) return;
+  const before = new Set((store.data.recurring || []).map((r) => r.id));
+  const data = await api('POST', 'api/recurring', {
+    type: 'expense', amount: round(st.next.payment), accountId, categoryId,
+    note: `Cuota ${loan.name}`, frequency: 'monthly', startDate: st.next.date, endDate: st.plan.endDate
+  });
+  const created = (data.recurring || []).find((r) => !before.has(r.id));
+  if (created) await api('PATCH', `api/loans/${loan.id}`, { recurringId: created.id });
+}
+function openLoanModal(loan = null) {
+  const type = loan?.type || 'mortgage';
+  const hasRule = Boolean(loan?.recurringId);
+  openSheet({
+    title: loan ? 'Editar préstamo' : 'Nuevo préstamo',
+    subtitle: 'Con estos datos calculamos la cuota, los intereses y el capital pendiente.',
+    submitLabel: loan ? 'Guardar cambios' : 'Añadir préstamo',
+    dangerLabel: loan ? 'Eliminar' : '',
+    body: `
+      <div class="form-grid">
+        <div class="field"><span>Nombre</span><input name="name" maxlength="60" placeholder="Ej. Hipoteca piso" value="${esc(loan?.name || '')}" required></div>
+        <div class="field"><span>Tipo</span><select name="type">
+          ${Object.entries(LOAN_TYPES).map(([value, meta]) => `<option value="${value}"${type === value ? ' selected' : ''}>${esc(meta.icon)} ${esc(meta.label)}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="form-grid">
+        <div class="field"><span>Capital prestado</span><input name="principal" type="number" min="1" step="0.01" inputmode="decimal" placeholder="150000" value="${loan ? esc(loan.principal) : ''}" required></div>
+        <div class="field"><span>Interés anual (TIN %)</span><input name="annualRate" type="number" min="0" max="60" step="0.001" inputmode="decimal" placeholder="2,9" value="${loan ? esc(loan.annualRate) : ''}" required></div>
+      </div>
+      <div class="form-grid">
+        <div class="field"><span>Plazo (años)</span><input name="years" type="number" min="0.1" max="50" step="0.0834" inputmode="decimal" placeholder="25" value="${loan ? esc(round(loan.termMonths / 12, 2)) : ''}" required></div>
+        <div class="field"><span>Primera cuota</span><input name="startDate" type="date" value="${esc(loan?.startDate || todayISO())}" required></div>
+      </div>
+      <div class="op-total" data-loan-preview></div>
+      ${hasRule ? '<p class="seg-note">La cuota mensual ya está en Recurrentes y se ajusta sola si cambias los datos.</p>' : `
+      <label class="checkbox"><input type="checkbox" name="makeRule" value="1"${loan ? '' : ' checked'} data-make-rule> Apuntar la cuota cada mes en Recurrentes</label>
+      <div class="form-grid" data-rule-fields>
+        <div class="field"><span>Se paga desde</span><select name="accountId">${accountOptions(loan?.accountId || store.data.accounts[0]?.id)}</select></div>
+        <div class="field"><span>Categoría</span><select name="categoryId">${expenseCategoryOptions(loan?.categoryId || defaultLoanCategory(type))}</select></div>
+      </div>`}
+      <div class="field"><span>Nota <span class="hint">(opcional)</span></span><input name="note" maxlength="300" placeholder="Ej. Banco, tipo fijo" value="${esc(loan?.note || '')}"></div>
+    `,
+    onMount(dialog, form) {
+      const preview = dialog.querySelector('[data-loan-preview]');
+      const update = () => {
+        const principal = payloadNumber(form.principal.value);
+        const rate = payloadNumber(form.annualRate.value);
+        const months = Math.round(payloadNumber(form.years.value) * 12);
+        if (!(principal > 0) || !(months > 0) || !form.startDate.value) { preview.innerHTML = ''; return; }
+        const plan = loanSchedule({ principal, annualRate: rate, termMonths: months, startDate: form.startDate.value, extraPayments: loan?.extraPayments || [] });
+        preview.innerHTML = `<span>Cuota</span><b>${esc(money(plan.initialPayment))}</b><span>· ${esc(monthsText(months))}</span><small>Intereses totales ${esc(money(plan.totalInterest))} · terminas en ${esc(monthYear(plan.endDate))}</small>`;
+      };
+      form.addEventListener('input', update);
+      update();
+      const toggle = dialog.querySelector('[data-make-rule]');
+      const fields = dialog.querySelector('[data-rule-fields]');
+      const sync = () => { if (fields) fields.hidden = !toggle.checked; };
+      toggle?.addEventListener('change', sync);
+      sync();
+      dialog.querySelector('select[name="type"]').addEventListener('change', (e) => {
+        if (form.categoryId) form.categoryId.value = defaultLoanCategory(e.target.value);
+      });
+    },
+    async onSubmit(formData) {
+      const payload = {
+        name: String(formData.get('name') || '').trim(),
+        type: formData.get('type'),
+        principal: payloadNumber(formData.get('principal')),
+        annualRate: payloadNumber(formData.get('annualRate')),
+        termMonths: Math.round(payloadNumber(formData.get('years')) * 12),
+        startDate: formData.get('startDate'),
+        note: String(formData.get('note') || '')
+      };
+      if (!payload.name) throw new Error('Ponle un nombre al préstamo.');
+      if (!(payload.principal > 0)) throw new Error('El capital debe ser mayor que cero.');
+      if (!(payload.termMonths >= 1)) throw new Error('El plazo debe ser de al menos un mes.');
+      const makeRule = !hasRule && formData.get('makeRule') === '1';
+      if (formData.get('accountId')) payload.accountId = formData.get('accountId');
+      if (formData.get('categoryId')) payload.categoryId = formData.get('categoryId');
+      let saved;
+      if (loan) {
+        await api('PATCH', `api/loans/${loan.id}`, payload);
+        saved = byId(store.data.loans, loan.id);
+        await syncLoanRecurring(loan.id);
+      } else {
+        const before = new Set((store.data.loans || []).map((l) => l.id));
+        const data = await api('POST', 'api/loans', payload);
+        saved = (data.loans || []).find((l) => !before.has(l.id));
+      }
+      if (saved && makeRule) await createLoanRecurring(saved, payload.accountId, payload.categoryId);
+      render();
+      toast(loan ? 'Préstamo actualizado' : 'Préstamo añadido');
+    },
+    async onDanger(dialog) {
+      const rule = loan.recurringId ? byId(store.data.recurring || [], loan.recurringId) : null;
+      const ok = await confirmDialog({
+        title: 'Eliminar préstamo',
+        message: rule ? 'También se eliminará su cuota de Recurrentes (los movimientos ya apuntados se conservan).' : 'Esta acción no se puede deshacer.',
+        confirm: 'Eliminar'
+      });
+      if (!ok) return;
+      await api('DELETE', `api/loans/${loan.id}`);
+      if (rule) await api('DELETE', `api/recurring/${rule.id}`).catch(() => {});
+      dialog.close();
+      dialog.remove();
+      render();
+      toast('Préstamo eliminado');
+    }
+  });
+}
+
+function openLoanTableModal(loan) {
+  const st = loanStatus(loan);
+  const today = todayISO();
+  const rows = st.plan.rows;
+  const nextIdx = rows.findIndex((x) => x.date > today);
+  const years = new Map();
+  for (const x of rows) {
+    const y = x.date.slice(0, 4);
+    const acc = years.get(y) || { interest: 0, capital: 0, extra: 0, balance: 0 };
+    acc.interest += x.interest; acc.capital += x.capital; acc.extra += x.extra; acc.balance = x.balance;
+    years.set(y, acc);
+  }
+  openSheet({
+    title: 'Cuadro de amortización',
+    subtitle: `${loan.name} · ${money(loan.principal, { decimals: 0 })} al ${String(loan.annualRate).replace('.', ',')} % en ${monthsText(loan.termMonths)}`,
+    wide: true,
+    hideSubmit: true,
+    secondaryLabel: 'Exportar CSV',
+    secondaryIcon: 'download',
+    body: `
+      <div class="op-total"><span>Pendiente hoy</span><b>${esc(money(st.pending))}</b><span>· intereses pagados ${esc(money(st.interestPaid))} · por pagar ${esc(money(st.interestLeft))}</span><small>${st.paidCount} de ${st.plan.months} cuotas pagadas · última cuota en ${esc(monthYear(st.plan.endDate))}</small></div>
+      <div class="seg" role="group" aria-label="Vista del cuadro" style="align-self:flex-start">
+        <button type="button" class="active" data-tab="years">Por años</button>
+        <button type="button" data-tab="months">Por meses</button>
+      </div>
+      <div class="table-wrap" data-pane="years"><table class="report-table">
+        <thead><tr><th>Año</th><th>Intereses</th><th>Capital</th><th>Anticipado</th><th>Pendiente</th></tr></thead>
+        <tbody>${[...years.entries()].map(([y, v]) => `<tr class="${y === today.slice(0, 4) ? 'is-current' : y > today.slice(0, 4) ? 'is-future' : ''}"><td>${y}</td><td>${esc(money(v.interest))}</td><td>${esc(money(v.capital))}</td><td>${v.extra ? esc(money(v.extra)) : '—'}</td><td>${esc(money(v.balance))}</td></tr>`).join('')}</tbody>
+      </table></div>
+      <div class="table-wrap" data-pane="months" hidden><table class="report-table">
+        <thead><tr><th>Cuota</th><th>Fecha</th><th>Pago</th><th>Intereses</th><th>Capital</th><th>Pendiente</th></tr></thead>
+        <tbody>${rows.map((x, i) => `<tr class="${i === nextIdx ? 'is-next' : x.date > today ? 'is-future' : ''}"><td>${x.n}</td><td>${esc(dateLabel(x.date))}</td><td>${esc(money(x.payment + x.extra))}</td><td>${esc(money(x.interest))}</td><td>${esc(money(x.capital + x.extra))}</td><td>${esc(money(x.balance))}</td></tr>`).join('')}</tbody>
+      </table></div>`,
+    onMount(dialog) {
+      dialog.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', () => {
+        dialog.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b === btn));
+        dialog.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== btn.dataset.tab; });
+      }));
+    },
+    onSecondary() {
+      const head = ['Cuota', 'Fecha', 'Pago', 'Intereses', 'Capital', 'Amortización anticipada', 'Pendiente'];
+      const body = rows.map((x) => [x.n, x.date, decimalComma(round(x.payment)), decimalComma(round(x.interest)), decimalComma(round(x.capital)), decimalComma(round(x.extra)), decimalComma(round(x.balance))]);
+      downloadFile(`amortizacion-${loan.name.toLowerCase().replace(/[^a-z0-9]+/gi, '-')}.csv`, csvText([head, ...body]), 'text/csv;charset=utf-8');
+    }
+  });
+}
+
+function openLoanExtraModal(loan) {
+  const st = loanStatus(loan);
+  const base = st.plan;
+  openSheet({
+    title: 'Amortizar anticipadamente',
+    subtitle: `${loan.name} · pendiente ${money(st.pending)}`,
+    submitLabel: 'Registrar amortización',
+    body: `
+      <div class="form-grid">
+        <div class="field"><span>Importe</span><input name="amount" type="number" min="1" step="0.01" inputmode="decimal" placeholder="5000" required></div>
+        <div class="field"><span>Fecha</span><input name="date" type="date" value="${esc(todayISO())}" required></div>
+      </div>
+      <div class="seg seg--full" role="group" aria-label="Qué reducir">
+        <button type="button" data-mode="term" class="active">Reducir plazo</button>
+        <button type="button" data-mode="payment">Reducir cuota</button>
+      </div>
+      <input type="hidden" name="mode" value="term">
+      <div class="op-total" data-sim><span>Escribe un importe para ver cuánto ahorras.</span></div>
+      <label class="checkbox"><input type="checkbox" name="asTx" value="1" checked data-as-tx> Apuntarlo como gasto en una cuenta</label>
+      <div class="form-grid" data-tx-fields>
+        <div class="field"><span>Cuenta</span><select name="accountId">${accountOptions(loan.accountId || store.data.accounts[0]?.id)}</select></div>
+        <div class="field"><span>Categoría</span><select name="categoryId">${expenseCategoryOptions(loan.categoryId || defaultLoanCategory(loan.type))}</select></div>
+      </div>
+      <p class="seg-note">Reducir plazo suele ahorrar más intereses; reducir cuota libera dinero cada mes. Revisa si tu banco cobra comisión por amortizar.</p>
+    `,
+    onMount(dialog, form) {
+      const out = dialog.querySelector('[data-sim]');
+      dialog.querySelectorAll('[data-mode]').forEach((btn) => btn.addEventListener('click', () => {
+        form.mode.value = btn.dataset.mode;
+        dialog.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('active', x === btn));
+        update();
+      }));
+      const update = () => {
+        const amount = Math.min(payloadNumber(form.amount.value), st.pending);
+        const mode = form.mode.value;
+        const date = form.date.value || todayISO();
+        if (!(amount > 0)) { out.innerHTML = '<span>Escribe un importe para ver cuánto ahorras.</span>'; return; }
+        const sim = loanSchedule(loan, [...(loan.extraPayments || []), { date, amount, mode }]);
+        const saved = base.totalInterest - sim.totalInterest;
+        const monthsLess = base.months - sim.months;
+        const nextSim = sim.rows.find((x) => x.date > date && x.payment > 0);
+        const detail = mode === 'term'
+          ? (monthsLess > 0 ? `terminas ${monthsText(monthsLess)} antes (${monthYear(sim.endDate)})` : 'mismo plazo')
+          : (nextSim ? `tu cuota baja a ${money(nextSim.payment)} (antes ${money(st.payment)})` : 'liquidas el préstamo');
+        out.innerHTML = `<span>Ahorras</span><b>${esc(money(Math.max(0, saved)))}</b><span>en intereses</span><small>${esc(detail.charAt(0).toUpperCase() + detail.slice(1))}.</small>`;
+      };
+      form.addEventListener('input', update);
+      form.addEventListener('change', update);
+      update();
+      const toggle = dialog.querySelector('[data-as-tx]');
+      const fields = dialog.querySelector('[data-tx-fields]');
+      toggle.addEventListener('change', () => { fields.hidden = !toggle.checked; });
+    },
+    async onSubmit(formData) {
+      const amount = round(Math.min(payloadNumber(formData.get('amount')), st.pending));
+      if (!(amount > 0)) throw new Error('El importe debe ser mayor que cero.');
+      const date = formData.get('date') || todayISO();
+      const mode = formData.get('mode') === 'payment' ? 'payment' : 'term';
+      const extraPayments = [...(loan.extraPayments || []), { date, amount, mode }];
+      await api('PATCH', `api/loans/${loan.id}`, { extraPayments });
+      await syncLoanRecurring(loan.id);
+      if (formData.get('asTx') === '1') {
+        await api('POST', 'api/transactions', { type: 'expense', amount, date, accountId: formData.get('accountId'), categoryId: formData.get('categoryId'), note: `Amortización anticipada ${loan.name}` });
+      }
+      render();
+      toast('Amortización registrada');
+    }
+  });
+}
+
+/* ---------------------------------------------------------------- sincronización cifrada */
+const SYNC_ITER = 310000;
+const b64 = {
+  encode(bytes) { let s = ''; const arr = new Uint8Array(bytes); for (let i = 0; i < arr.length; i += 0x8000) s += String.fromCharCode(...arr.subarray(i, i + 0x8000)); return btoa(s); },
+  decode(text) { const s = atob(String(text)); const out = new Uint8Array(s.length); for (let i = 0; i < s.length; i += 1) out[i] = s.charCodeAt(i); return out; }
+};
+function hasWebCrypto() { return Boolean(globalThis.crypto?.subtle && globalThis.isSecureContext); }
+async function deriveKey(passphrase, salt, iter) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+function syncPayload() {
+  const { pinEnabled, ...settings } = store.data.settings;
+  const { serverTime, ...rest } = store.data;
+  return { ...rest, settings };
+}
+async function sealSync(passphrase) {
+  if (passphrase.length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.');
+  if (!hasWebCrypto()) return (await api('POST', 'api/sync/seal', { passphrase })).package;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(passphrase, salt, SYNC_ITER);
+  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(syncPayload())));
+  return { app: 'mi-cartera', kind: 'sync', v: 1, kdf: 'PBKDF2-SHA256', iter: SYNC_ITER, salt: b64.encode(salt), iv: b64.encode(iv), data: b64.encode(data), createdAt: new Date().toISOString() };
+}
+async function openSync(passphrase, pkg) {
+  if (!pkg || pkg.app !== 'mi-cartera' || pkg.v !== 1) throw new Error('El archivo no es un paquete de Mi Cartera.');
+  if (!hasWebCrypto()) return (await api('POST', 'api/sync/open', { passphrase, package: pkg })).data;
+  try {
+    const key = await deriveKey(passphrase, b64.decode(pkg.salt), Number(pkg.iter) || SYNC_ITER);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64.decode(pkg.iv) }, key, b64.decode(pkg.data));
+    return JSON.parse(new TextDecoder().decode(plain));
+  } catch {
+    throw new Error('Contraseña incorrecta o archivo dañado.');
+  }
+}
+function openSyncExportModal() {
+  openSheet({
+    title: 'Crear paquete cifrado',
+    subtitle: 'Un archivo con todos tus datos protegido con contraseña (AES-256). Sin ella nadie puede abrirlo.',
+    submitLabel: 'Crear y descargar',
+    body: `
+      <div class="field"><span>Contraseña <span class="hint">(mínimo 8 caracteres)</span></span><input name="pass" type="password" minlength="8" autocomplete="new-password" required></div>
+      <div class="field"><span>Repite la contraseña</span><input name="pass2" type="password" minlength="8" autocomplete="new-password" required></div>
+      <p class="seg-note">Guárdalo donde quieras: un pendrive, tu nube o envíatelo por correo. Si olvidas la contraseña no se puede recuperar.</p>`,
+    async onSubmit(formData) {
+      const pass = String(formData.get('pass') || '');
+      if (pass !== String(formData.get('pass2') || '')) throw new Error('Las contraseñas no coinciden.');
+      const pkg = await sealSync(pass);
+      downloadFile(`mi-cartera-${todayISO()}.mcsync`, JSON.stringify(pkg), 'application/json');
+      toast('Paquete cifrado descargado');
+    }
+  });
+}
+function openSyncImportModal(file) {
+  openSheet({
+    title: 'Abrir paquete cifrado',
+    subtitle: file.name,
+    submitLabel: 'Abrir',
+    body: `
+      <div class="field"><span>Contraseña del paquete</span><input name="pass" type="password" autocomplete="current-password" required></div>
+      <div class="seg seg--full" role="group" aria-label="Qué hacer con los datos">
+        <button type="button" data-mode="merge" class="active">Combinar</button>
+        <button type="button" data-mode="replace">Reemplazar todo</button>
+      </div>
+      <input type="hidden" name="mode" value="merge">
+      <p class="seg-note" data-mode-note>Une los datos de los dos dispositivos. Si algo se cambió en ambos, gana el cambio más reciente; lo que borraste se queda borrado.</p>
+      <p class="seg-note">Antes de aplicar nada se guarda una copia automática de tus datos actuales.</p>`,
+    onMount(dialog, form) {
+      const note = dialog.querySelector('[data-mode-note]');
+      dialog.querySelectorAll('[data-mode]').forEach((btn) => btn.addEventListener('click', () => {
+        form.mode.value = btn.dataset.mode;
+        dialog.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('active', x === btn));
+        note.textContent = btn.dataset.mode === 'merge'
+          ? 'Une los datos de los dos dispositivos. Si algo se cambió en ambos, gana el cambio más reciente; lo que borraste se queda borrado.'
+          : 'Sustituye todo lo de este dispositivo por el contenido del paquete. Útil al cambiar de ordenador.';
+      }));
+    },
+    async onSubmit(formData) {
+      let pkg;
+      try { pkg = JSON.parse(await file.text()); } catch { throw new Error('El archivo no es un paquete válido.'); }
+      const data = await openSync(String(formData.get('pass') || ''), pkg);
+      const mode = formData.get('mode');
+      const result = mode === 'replace' ? await api('POST', 'api/import', { data }) : await api('POST', 'api/sync/merge', { data });
+      render();
+      toast(mode === 'replace' ? `Datos reemplazados: ${result.imported?.transactions ?? 0} movimientos` : `Sincronizado: ${store.data.transactions.length} movimientos en total`);
+    }
+  });
+}
+
+/* ---------------------------------------------------------------- copias automáticas */
+const BACKUP_KIND = { daily: 'Diaria', manual: 'Manual', safety: 'Seguridad' };
+function backupLabel(b) {
+  const m = b.name.match(/^db-(?:([a-z-]+?)-)?(\d{4}-\d{2}-\d{2})/);
+  const reason = m?.[1] && m[1] !== 'manual' ? m[1].replace(/^antes-de-/, 'antes de ').replace(/-/g, ' ') : '';
+  return reason ? `Copia ${reason}` : b.kind === 'manual' ? 'Copia manual' : 'Copia diaria';
+}
+async function openBackupsModal() {
+  const { backups } = await api('GET', 'api/backups');
+  const when = (iso) => new Date(iso).toLocaleString(locale(), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  openSheet({
+    title: 'Copias automáticas',
+    subtitle: WEB ? 'Guardadas en este navegador: una diaria (últimos 5 días) y una antes de cada cambio grande.' : 'Guardadas en data/backups: una diaria (14 días) y una antes de importar, sincronizar o borrar.',
+    wide: true,
+    hideSubmit: true,
+    secondaryLabel: 'Crear copia ahora',
+    secondaryIcon: 'plus',
+    body: backups.length ? `<div class="txlist backup-list">${backups.map((b) => `<div class="txrow">
+        <span class="tx-icon">${icon(b.kind === 'daily' ? 'calendar' : b.kind === 'manual' ? 'download' : 'shield', 17)}</span>
+        <span class="tx-main"><span class="tx-title">${esc(backupLabel(b))}</span><span class="tx-meta">${esc(when(b.at))} · ${b.counts ? `${b.counts.transactions} movimientos · ${b.counts.accounts} cuentas` : 'sin detalles'}</span></span>
+        <button class="btn btn-ghost btn-sm" type="button" data-restore="${esc(b.name)}">Restaurar</button>
+      </div>`).join('')}</div>` : '<div class="empty"><span class="empty-icon">🗂️</span><h3>Aún no hay copias</h3><p>Se crean solas al guardar cambios.</p></div>',
+    onMount(dialog) {
+      dialog.querySelectorAll('[data-restore]').forEach((btn) => btn.addEventListener('click', async () => {
+        const ok = await confirmDialog({ title: 'Restaurar copia', message: 'Tus datos actuales se sustituirán por los de esta copia. Antes se guarda una copia de seguridad de lo que tienes ahora.', confirm: 'Restaurar', danger: false });
+        if (!ok) return;
+        try {
+          await api('POST', 'api/backups/restore', { name: btn.dataset.restore });
+          dialog.close();
+          render();
+          toast('Copia restaurada');
+        } catch (err) { toast(err.message, 'error'); }
+      }));
+    },
+    async onSecondary(dialog) {
+      await api('POST', 'api/backups');
+      dialog.close();
+      toast('Copia creada');
+      openBackupsModal();
+    }
+  });
+}
+
+/* ---------------------------------------------------------------- abrir en el móvil */
+function qrSVG(text) {
+  const factory = globalThis.qrcode;
+  if (typeof factory !== 'function') return '';
+  const qr = factory(0, 'M');
+  qr.addData(text);
+  qr.make();
+  const n = qr.getModuleCount();
+  let path = '';
+  for (let r = 0; r < n; r += 1) for (let c = 0; c < n; c += 1) if (qr.isDark(r, c)) path += `M${c} ${r}h1v1h-1z`;
+  return `<svg class="qr" viewBox="-2 -2 ${n + 4} ${n + 4}" role="img" aria-label="Código QR de ${esc(text)}" shape-rendering="crispEdges"><rect x="-2" y="-2" width="${n + 4}" height="${n + 4}" fill="#fff"/><path d="${path}" fill="#111"/></svg>`;
+}
+async function openPhoneModal() {
+  let info = { web: true };
+  try { info = await api('GET', 'api/network'); } catch { /* sin datos */ }
+  if (info.web) {
+    const url = location.href.split('#')[0];
+    openSheet({
+      title: 'Abrir en el móvil',
+      subtitle: 'Escanea el código con la cámara del móvil.',
+      hideSubmit: true,
+      body: `<div class="qr-wrap">${qrSVG(url)}<code class="path-box">${esc(url)}</code></div>
+        <p class="seg-note">Ojo: en la versión web cada navegador guarda sus propios datos. Para llevarte los de aquí al móvil usa <b>Sincronización cifrada</b>.</p>
+        <p class="seg-note">En el iPhone, pulsa Compartir → <b>Añadir a pantalla de inicio</b> y se abrirá como una app.</p>`
+    });
+    return;
+  }
+  const urls = info.urls || [];
+  openSheet({
+    title: 'Abrir en el móvil',
+    subtitle: 'El móvil tiene que estar en la misma Wi-Fi que este ordenador.',
+    hideSubmit: true,
+    wide: urls.length > 1,
+    body: urls.length ? `<div class="qr-grid">${urls.map((u) => `<div class="qr-wrap">${qrSVG(u)}<code class="path-box">${esc(u)}</code></div>`).join('')}</div>
+      <ol class="steps">
+        <li>Escanea el código con la cámara del móvil (o escribe la dirección).</li>
+        <li>Si no carga, comprueba que el móvil no usa datos móviles ni una Wi-Fi de invitados.</li>
+        ${info.platform === 'win32' ? '<li>Si sigue sin cargar, haz doble clic en <b>permitir-movil.bat</b> (en la carpeta de la app) y acepta el permiso de administrador. Abre el puerto solo en redes privadas.</li><li>En Windows, la Wi-Fi debe estar marcada como <b>red privada</b>: Configuración → Red e Internet → Wi-Fi → tu red → Perfil de red: Privada.</li>' : '<li>Si tienes cortafuegos, permite conexiones entrantes al puerto ' + esc(info.port) + '.</li>'}
+        <li>En el iPhone: Compartir → <b>Añadir a pantalla de inicio</b>.</li>
+      </ol>` : '<div class="empty"><span class="empty-icon">📶</span><h3>Sin red local</h3><p>Este ordenador no está conectado a ninguna Wi-Fi o red. Conéctalo y vuelve a abrir esta ventana.</p></div>'
+  });
+}
+
+/* ---------------------------------------------------------------- cotizaciones */
+function quotable(inv) {
+  if (WEB) return inv.type === 'crypto' && Boolean(inv.quoteSymbol || inv.symbol);
+  return Boolean(inv.quoteSymbol || (inv.symbol && ['stock', 'etf', 'crypto'].includes(inv.type)));
+}
+async function refreshPricesNow({ silent = false } = {}) {
+  const list = (store.data.investments || []).filter(quotable);
+  if (!list.length) {
+    if (!silent) toast(WEB ? 'En la versión web solo se actualizan criptomonedas con símbolo (BTC, ETH…).' : 'Añade el símbolo de cotización a tus inversiones (por ejemplo IWDA.AS o AAPL).', 'error');
+    return;
+  }
+  if (!silent) toast('Consultando cotizaciones…');
+  const result = await api('POST', 'api/prices/refresh', {});
+  const ok = (result.results || []).filter((r) => r.ok);
+  const failed = (result.results || []).filter((r) => !r.ok);
+  render();
+  if (!silent || failed.length) {
+    if (failed.length) {
+      const names = failed.slice(0, 3).map((f) => f.name).join(', ') + (failed.length > 3 ? '…' : '');
+      toast(`${ok.length} de ${ok.length + failed.length} actualizadas. Sin precio: ${names}. ${failed[0].error}`, ok.length ? 'success' : 'error');
+    }
+    else toast(`${ok.length} ${ok.length === 1 ? 'cotización actualizada' : 'cotizaciones actualizadas'}`);
+  }
+}
+async function maybeAutoRefreshPrices() {
+  const s = store.data?.settings;
+  if (!s?.autoPrices || store.offline) return;
+  if (String(s.pricesRefreshedAt || '').slice(0, 10) === todayISO()) return;
+  try { await refreshPricesNow({ silent: true }); } catch { /* sin conexión: se reintenta otro día */ }
+}
+
+/* ---------------------------------------------------------------- actualizaciones de la app */
+async function forceUpdate() {
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if (globalThis.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((k) => k.startsWith('micartera')).map((k) => caches.delete(k)));
+    }
+  } catch { /* seguimos con la recarga */ }
+  const url = new URL(location.href);
+  url.searchParams.set('v', Date.now().toString(36));
+  location.replace(url.toString());
+}
+function setupServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    toast('Hay una versión nueva de Mi Cartera. Recargando…');
+    setTimeout(() => location.reload(), 900);
+  });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+    .then((reg) => { reg.update().catch(() => {}); })
+    .catch(() => {});
+}
+
 /* ---------------------------------------------------------------- vistas y arranque */
 const VIEWS = {
   resumen: viewResumen,
@@ -3082,6 +3846,7 @@ const VIEWS = {
   presupuestos: viewPresupuestos,
   recurrentes: viewRecurrentes,
   objetivos: viewObjetivos,
+  prestamos: viewPrestamos,
   informes: viewInformes,
   mas: viewMas,
   ajustes: viewAjustes
