@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f3f5f4" id="metaTheme">
+  <meta name="description" content="Finanzas personales 100% locales: ingresos, gastos e inversiones.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mi Cartera">
+  <title>Mi Cartera · Finanzas personales</title>
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="boot" class="boot">
+    <span class="brand-mark brand-mark--big" aria-hidden="true"><i></i><i></i><i></i></span>
+    <p>Cargando tus finanzas…</p>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#/resumen">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-text"><strong>Mi Cartera</strong><small>finanzas personales</small></span>
+      </a>
+      <nav class="nav" id="sideNav" aria-label="Secciones"></nav>
+      <div class="sidebar-foot">
+        <div class="local-chip"><span class="pulse"></span> Solo en tu red local</div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="theme-toggle">
+          <span data-theme-icon></span><span data-theme-label>Cambiar tema</span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <a class="brand brand--top mobile-only" href="#/resumen">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="brand-text"><strong>Mi Cartera</strong></span>
+        </a>
+        <div class="date-chip desktop-only" id="todayChip"></div>
+        <div class="topbar-actions">
+          <button class="icon-btn" type="button" data-action="theme-toggle" aria-label="Cambiar tema">
+            <span data-theme-icon></span>
+          </button>
+          <button class="btn btn-primary" type="button" data-action="new-tx">
+            <span class="plus">+</span> <span class="desktop-only">Nuevo movimiento</span><span class="mobile-only">Añadir</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="view" id="view" tabindex="-1"></main>
+
+      <footer class="appfoot">
+        <span>Mi Cartera · tus datos no salen de tu ordenador</span>
+        <span id="footInfo" class="foot-info"></span>
+      </footer>
+    </div>
+
+    <nav class="bottomnav mobile-only" id="bottomNav" aria-label="Navegación"></nav>
+    <button class="fab mobile-only" type="button" data-action="new-tx" aria-label="Nuevo movimiento">+</button>
+  </div>
+
+  <div class="lock" id="lock" hidden>
+    <form class="lock-card" id="lockForm">
+      <span class="brand-mark brand-mark--big" aria-hidden="true"><i></i><i></i><i></i></span>
+      <h1>Mi Cartera</h1>
+      <p>Tus datos están protegidos con un PIN.</p>
+      <label class="field">
+        <span>PIN de acceso</span>
+        <input id="pinInput" name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" placeholder="••••" required>
+      </label>
+      <p class="form-error" id="lockError" hidden></p>
+      <button class="btn btn-primary btn-block" type="submit">Entrar</button>
+      <small>Este dispositivo recordará la sesión durante 30 días.</small>
+    </form>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+  <noscript><p style="padding:2rem;font-family:sans-serif">Necesitas activar JavaScript para usar Mi Cartera.</p></noscript>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
