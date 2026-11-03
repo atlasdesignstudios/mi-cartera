@@ -15,7 +15,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const PORT = Number(process.env.PORT) || 4321;
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 let LISTEN_PORT = PORT;
 
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -84,7 +84,7 @@ function defaultState() {
   });
   return {
     rev: 0,
-    settings: { currency: 'EUR', locale: 'es-ES', theme: 'auto', pinHash: null, autoPrices: true, marketV15: true, pricesRefreshedAt: null, marketProxy: '', profile: 'personal', onboarded: false, modules: defaultModules('personal'), business: sanitizeBusiness({}) },
+    settings: { currency: 'EUR', locale: 'es-ES', theme: 'auto', pinHash: null, autoPrices: true, marketV15: true, pricesRefreshedAt: null, marketProxy: '', finnhubKey: '', profile: 'personal', onboarded: false, modules: defaultModules('personal'), business: sanitizeBusiness({}) },
     accounts: [
       acc('Cuenta principal', 'bank', '#0e9f6e'),
       acc('Ahorro', 'savings', '#3b82f6'),
@@ -623,6 +623,7 @@ function upgradeSettings(state, raw) {
     : defaultModules(s.profile);
   s.modules = sanitizeModules(raw.modules, legacy);
   s.business = sanitizeBusiness(raw.business || {});
+  s.finnhubKey = typeof raw.finnhubKey === 'string' && /^[A-Za-z0-9]{12,64}$/.test(raw.finnhubKey) ? raw.finnhubKey : '';
   s.marketProxy = typeof raw.marketProxy === 'string' && /^https:\/\//i.test(raw.marketProxy) ? raw.marketProxy.slice(0, 300) : '';
   // 1.5: los iconos pasan de emoji a iconos de línea.
   for (const c of state.categories || []) c.icon = normalizeGlyph(c.icon, c.kind === 'income' ? 'plusCircle' : 'box');
@@ -1504,8 +1505,49 @@ function pct(a, b) {
 
 const r6 = (n) => (Number.isFinite(n) ? Math.round(n * 1e6) / 1e6 : null);
 
+/* Fuentes de precios, de más a menos oficial:
+   - Cripto: Coinbase Exchange (API pública de un mercado regulado, sin clave).
+   - Acciones y ETF de EE. UU.: Finnhub en tiempo real (clave gratuita del usuario).
+   - Tipos de cambio: Banco Central Europeo (tipos de referencia oficiales, diarios).
+   - Lo demás (ETF y acciones europeas, fondos) y el histórico de bolsa: Yahoo Finance como respaldo,
+     porque ninguna fuente oficial gratuita los publica. */
+const CRYPTO_RE = /^([A-Z0-9]{2,10})-(EUR|USD|GBP|USDC|USDT|BTC)$/;
+const US_TICKER_RE = /^[A-Z]{1,5}$/;
+const RANGE_DAYS = { '5d': 7, '1mo': 31, '3mo': 92, '6mo': 183, '1y': 366 };
+
+async function coinbaseChart(product, { range, from, to } = {}) {
+  const end = to || Date.now();
+  const start = from || end - (RANGE_DAYS[range] || 92) * DAY_MS;
+  const base = `https://api.exchange.coinbase.com/products/${encodeURIComponent(product)}`;
+  const iso = (t) => new Date(t).toISOString();
+  const [candles, ticker] = await Promise.all([
+    marketJson(`${base}/candles?granularity=86400&start=${iso(start)}&end=${iso(Math.min(end, Date.now()))}`, range ? 5 * 60000 : 6 * 3600000),
+    range ? marketJson(`${base}/ticker`, 20000) : Promise.resolve(null)
+  ]);
+  if (!Array.isArray(candles)) throw new Error(`No se encontró ${product} en Coinbase.`);
+  // Coinbase: [hora, mínimo, máximo, apertura, cierre, volumen], de la más reciente a la más antigua.
+  const bars = candles.map((c) => ({ date: utcISO(c[0] * 1000), low: Number(c[1]), high: Number(c[2]), open: Number(c[3]), close: Number(c[4]) }))
+    .filter((b) => b.close > 0).sort((a, b) => a.date.localeCompare(b.date));
+  const quote = product.split('-')[1];
+  const price = Number(ticker?.price) || (bars.length ? bars[bars.length - 1].close : 0);
+  return {
+    symbol: product, name: product, exchange: 'Coinbase', type: 'CRYPTOCURRENCY',
+    currency: quote === 'USDC' || quote === 'USDT' ? 'USD' : quote,
+    price, time: ticker?.time ? new Date(ticker.time).toISOString() : new Date().toISOString(),
+    bars, source: 'Coinbase', dayOpenUtc: true
+  };
+}
+
+async function marketChart(symbol, opts = {}) {
+  const m = CRYPTO_RE.exec(String(symbol).toUpperCase());
+  if (m && m[2] !== 'BTC') {
+    try { return await coinbaseChart(`${m[1]}-${m[2]}`, opts); } catch (err) { if (/^HTTP|conexi/i.test(err.message)) throw err; }
+  }
+  return yahooChart(symbol, opts);
+}
+
 /** Velas diarias de Yahoo Finance ya limpias y con la moneda normalizada. */
-async function marketChart(symbol, { range, from, to } = {}) {
+async function yahooChart(symbol, { range, from, to } = {}) {
   const span = range ? `range=${range}` : `period1=${Math.floor(from / 1000)}&period2=${Math.floor(to / 1000)}`;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${span}&interval=1d&includePrePost=false`;
   const body = await marketJson(url, range ? 5 * 60000 : 6 * 3600000);
@@ -1540,13 +1582,48 @@ async function marketChart(symbol, { range, from, to } = {}) {
     currency,
     price: Number(meta.regularMarketPrice) * factor || (bars.length ? bars[bars.length - 1].close : 0),
     time: Number(meta.regularMarketTime) ? new Date(Number(meta.regularMarketTime) * 1000).toISOString() : null,
-    bars
+    bars,
+    source: 'Yahoo Finance'
   };
+}
+
+/** Tipos de referencia del BCE: unidades de `cur` por 1 euro en los últimos días hasta `date`. */
+async function ecbSeries(cur, date) {
+  if (cur === 'EUR') return [{ date: date || todayISO(), rate: 1 }];
+  if (!/^[A-Z]{3}$/.test(cur)) throw new Error('Moneda no válida.');
+  const end = date || todayISO();
+  const start = utcISO(Date.parse(`${end}T12:00:00Z`) - 12 * DAY_MS);
+  const url = `https://data-api.ecb.europa.eu/service/data/EXR/D.${cur}.EUR.SP00.A?startPeriod=${start}&endPeriod=${end}&format=jsondata`;
+  const body = await marketJson(url, date && date < todayISO() ? 24 * 3600000 : 3600000);
+  const series = body?.dataSets?.[0]?.series;
+  const first = series && series[Object.keys(series)[0]];
+  const dates = body?.structure?.dimensions?.observation?.[0]?.values || [];
+  const out = Object.entries(first?.observations || {})
+    .map(([i, v]) => ({ date: dates[Number(i)]?.id, rate: Number(v?.[0]) }))
+    .filter((x) => x.date && x.rate > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (!out.length) throw new Error(`El BCE no publica el cambio ${cur}/EUR.`);
+  return out;
+}
+async function ecbRate(from, to, date) {
+  const [a, b] = await Promise.all([ecbSeries(from, date), ecbSeries(to, date)]);
+  const pick = (list) => (date ? [...list].reverse().find((x) => x.date <= date) || list[0] : list[list.length - 1]).rate;
+  return pick(b) / pick(a);
+}
+
+/** Cotización en tiempo real de Finnhub (acciones y ETF de EE. UU.). */
+async function finnhubQuote(symbol) {
+  const key = String(db.settings.finnhubKey || '');
+  if (!key || !US_TICKER_RE.test(symbol)) return null;
+  const q = await marketJson(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(key)}`, 15000);
+  if (!(Number(q?.c) > 0)) return null;
+  return { price: Number(q.c), prevClose: Number(q.pc) || null, time: Number(q.t) ? new Date(q.t * 1000).toISOString() : new Date().toISOString() };
 }
 
 /** Tipo de cambio de una moneda a la de la app (1 si son iguales). */
 async function fxNow(from, to) {
   if (!from || from === to) return 1;
+  try { return await ecbRate(from, to); } catch { /* respaldo */ }
   const chart = await marketChart(`${from}${to}=X`, { range: '5d' });
   if (!(chart.price > 0)) throw new Error(`No hay tipo de cambio ${from}/${to}.`);
   return chart.price;
@@ -1554,6 +1631,7 @@ async function fxNow(from, to) {
 
 async function fxOn(from, to, date) {
   if (!from || from === to) return 1;
+  try { return await ecbRate(from, to, date); } catch { /* respaldo */ }
   const t = Date.parse(`${date}T12:00:00Z`);
   const chart = await marketChart(`${from}${to}=X`, { from: t - 10 * DAY_MS, to: t + 2 * DAY_MS });
   const bar = [...chart.bars].reverse().find((b) => b.date <= date) || chart.bars[0];
@@ -1563,7 +1641,16 @@ async function fxOn(from, to, date) {
 
 /** Cotización actual: precio, variación del día y evolución de los últimos 3 meses. */
 async function marketQuote(symbol, target) {
-  const chart = await marketChart(symbol, { range: '3mo' });
+  let live = null;
+  try { live = await finnhubQuote(symbol); } catch { live = null; }
+  let chart;
+  try {
+    chart = await marketChart(symbol, { range: '3mo' });
+  } catch (err) {
+    if (!live) throw err;
+    chart = { symbol, name: symbol, exchange: 'EE. UU.', currency: 'USD', price: live.price, time: live.time, bars: [] };
+  }
+  if (live) Object.assign(chart, { price: live.price, time: live.time, currency: 'USD', source: 'Finnhub' });
   if (!(chart.price > 0)) throw new Error(`${symbol} no tiene precio ahora mismo.`);
   const fx = await fxNow(chart.currency, target);
   const bars = chart.bars;
@@ -1578,8 +1665,11 @@ async function marketQuote(symbol, target) {
     time = `${last.date}T21:00:00.000Z`;
   }
   const prevBar = last && last.date === today ? bars[bars.length - 2] : last;
-  const prevClose = prevBar ? prevBar.close : null;
+  let prevClose = prevBar ? prevBar.close : null;
+  if (chart.dayOpenUtc && last && last.date === utcISO(Date.now())) prevClose = last.open; // cripto: desde las 00:00 UTC
+  if (live && live.prevClose) prevClose = live.prevClose;
   return {
+    source: chart.source || 'Yahoo Finance',
     symbol: chart.symbol,
     name: chart.name,
     exchange: chart.exchange,
@@ -1743,6 +1833,7 @@ function quoteFields(q) {
     marketName: q.name,
     exchange: q.exchange,
     priceAt: q.time || new Date().toISOString(),
+    priceSource: q.source || MARKET_SOURCE,
     spark: q.spark,
     priceUpdatedAt: todayISO()
   };
@@ -1759,7 +1850,7 @@ async function refreshPrices(ids) {
       try {
         const fields = quoteFields(await marketQuote(inv.quoteSymbol, target));
         const current = db.investments.find((x) => x.id === inv.id);
-        if (current) Object.assign(current, fields, { priceSource: MARKET_SOURCE, updatedAt: new Date().toISOString() });
+        if (current) Object.assign(current, fields, { updatedAt: new Date().toISOString() });
         results.push({ id: inv.id, name: inv.name, ok: true, price: fields.currentPrice, symbol: inv.quoteSymbol });
       } catch (err) {
         results.push({ id: inv.id, name: inv.name, ok: false, error: err.message });
@@ -1875,7 +1966,7 @@ function serveStatic(req, res, pathname) {
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'X-Frame-Options': 'DENY',
-      'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' wss://streamer.finance.yahoo.com; manifest-src 'self'; base-uri 'none'; form-action 'self'"
+      'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' wss://ws-feed.exchange.coinbase.com wss://ws.finnhub.io wss://streamer.finance.yahoo.com; manifest-src 'self'; base-uri 'none'; form-action 'self'"
     };
     res.writeHead(200, headers);
     if (req.method === 'HEAD') return res.end();
@@ -1949,6 +2040,11 @@ async function handleApi(req, res, pathname) {
     }
     if (body.locale !== undefined) db.settings.locale = validLocale(body.locale, db.settings.locale);
     if (body.autoPrices !== undefined) db.settings.autoPrices = Boolean(body.autoPrices);
+    if (body.finnhubKey !== undefined) {
+      const key = String(body.finnhubKey || '').trim();
+      if (key && !/^[A-Za-z0-9]{12,64}$/.test(key)) throw bad('La clave de Finnhub no tiene el formato correcto.');
+      db.settings.finnhubKey = key;
+    }
     if (body.marketProxy !== undefined) {
       const proxy = String(body.marketProxy || '').trim().slice(0, 300);
       if (proxy && !/^https:\/\/[^\s]+$/i.test(proxy)) throw bad('El intermediario debe ser una dirección https://');

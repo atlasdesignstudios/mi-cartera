@@ -162,6 +162,17 @@ async function tryRoute(route, url) {
   return body;
 }
 async function marketFetchJson(url) {
+  // Coinbase, el BCE y Finnhub permiten llamadas directas desde el navegador: sin intermediario.
+  if (!/yahoo\.com/i.test(url)) {
+    let response;
+    try { response = await nativeFetch(url, { signal: AbortSignal.timeout(10000) }); }
+    catch { throw Object.assign(new Error('No hay conexión con el servicio de cotizaciones.'), { network: true }); }
+    if (response.status === 404) throw new Error('Ese valor no existe en el mercado.');
+    if (!response.ok) throw Object.assign(new Error('HTTP ' + response.status), { network: response.status === 429 || response.status >= 500 });
+    const body = await response.json().catch(() => null);
+    if (!body) throw Object.assign(new Error('Respuesta vacía'), { network: true });
+    return body;
+  }
   const custom = customProxyRoute();
   if (custom) {
     try { return await tryRoute(custom, url); } catch (err) { if (err.final) throw err; }

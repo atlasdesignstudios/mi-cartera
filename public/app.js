@@ -4,7 +4,7 @@ import * as F from './fiscal.js';
 import { GLYPHS, glyphSVG, normalizeGlyph } from './glyphs.js';
 
 const STORAGE_KEY = 'micartera.state.v1';
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 // En la versión web (GitHub Pages) no hay servidor: los datos viven en este navegador.
 const WEB = Boolean(globalThis.MC_WEB);
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'MXN', 'ARS', 'COP', 'CLP', 'PEN', 'BRL', 'UYU', 'JPY'];
@@ -1117,7 +1117,7 @@ function allocationBar(data) {
 }
 
 /* ---------------------------------------------------------------- mercado */
-// Acciones, ETF, fondos y cripto se valoran siempre con el precio real del mercado (Yahoo Finance).
+// Acciones, ETF, fondos y cripto se valoran siempre con el precio real del mercado (Coinbase, Finnhub, BCE y Yahoo Finance de respaldo).
 const MARKET_TYPES = ['stock', 'etf', 'fund', 'crypto'];
 function marketLinked(inv) { return Boolean(inv && MARKET_TYPES.includes(inv.type) && inv.quoteSymbol); }
 function needsMarketLink(inv) { return Boolean(inv && MARKET_TYPES.includes(inv.type) && !inv.quoteSymbol); }
@@ -1208,7 +1208,7 @@ function holdingCard(h) {
       </div>
       ${sparkline(h.spark)}
     </div>
-    <p class="holding-src">${foreign ? `${esc(nativeMoney(h.nativePrice, h.nativeCurrency))} al cambio · ` : ''}${liveLabel(h) ? '<span class="live-dot"></span>En directo · Yahoo Finance' : `Yahoo Finance · ${esc(agoLabel(h.priceAt) || 'sin consultar')}`}</p>`
+    <p class="holding-src">${foreign ? `${esc(nativeMoney(h.nativePrice, h.nativeCurrency))} al cambio · ` : ''}${liveLabel(h) ? `<span class="live-dot"></span>En directo · ${esc(h.priceSource || 'mercado')}` : `${esc(h.priceSource || 'Mercado')} · ${esc(agoLabel(h.priceAt) || 'sin consultar')}`}</p>`
     : needsMarketLink(h) ? `<div class="holding-warn">${icon('alert', 15)}<span>Precio puesto a mano: puede no ser real. <button type="button" class="link-btn" data-action="edit-investment" data-id="${esc(h.id)}">Vincúlalo al mercado</button></span></div>` : ''}
     <dl class="metrics">
       <div><dt>Unidades</dt><dd>${esc(unitsLabel(h.units))}</dd></div>
@@ -1269,7 +1269,7 @@ function viewInversiones() {
   return `
   ${store.offline ? `<div class="banner">${icon('alert', 17)}<span><b>Sin conexión.</b> Mostrando la última copia guardada.</span></div>` : ''}
   <div class="viewhead">
-    <div><h1>Inversiones</h1><p>${anyLinked ? `Valoradas con el precio real del mercado${live.connected ? ' · <span class="live-dot"></span>en directo' : refreshed ? ` · actualizado ${esc(agoLabel(refreshed))}` : ''}.` : 'Tu cartera, sus aportaciones y lo que está ganando.'}</p></div>
+    <div><h1>Inversiones</h1><p>${anyLinked ? `Valoradas con el precio real del mercado${liveConnected() ? ' · <span class="live-dot"></span>en directo' : refreshed ? ` · actualizado ${esc(agoLabel(refreshed))}` : ''}.` : 'Tu cartera, sus aportaciones y lo que está ganando.'}</p></div>
     <div class="head-actions">
       ${anyLinked ? `<button class="btn btn-ghost" type="button" data-action="refresh-prices" title="Consulta los precios actuales del mercado">${icon('refresh', 16)} Actualizar precios</button>` : ''}
       <button class="btn btn-ghost" type="button" data-action="new-op">${icon('plus', 16)} Operación</button>
@@ -1304,7 +1304,7 @@ function viewInversiones() {
     <div class="card-head"><div><h2>Últimas operaciones</h2><p>Con el precio del mercado de cada día y cómo iba el valor cuando compraste</p></div></div>
     <div class="history-list">${recentOps.map(opRow).join('')}</div>
   </section>` : ''}
-  <p class="tiny legal-note">Cotizaciones de Yahoo Finance con el retraso habitual (unos 15 minutos en bolsa). Los valores en otra moneda se convierten al cambio del día. Información orientativa, no es asesoramiento financiero.</p>
+  <p class="tiny legal-note">Cripto en tiempo real de Coinbase Exchange${store.data?.settings?.finnhubKey ? ', acciones y ETF de EE. UU. en tiempo real de Finnhub' : ''}; el resto de bolsas y los fondos, de Yahoo Finance como respaldo (con el retraso habitual). Las divisas se convierten con el cambio oficial del Banco Central Europeo. Información orientativa, no es asesoramiento financiero.</p>
   ` : `<section class="card">
     <div class="empty">
       <span class="empty-icon">${icon('trend', 26)}</span>
@@ -1985,7 +1985,13 @@ function viewAjustes() {
 
     <section class="card setting-card">
       <h2>Cotizaciones</h2>
-      <p>Acciones, ETF, fondos indexados y cripto se valoran con el precio real del mercado (Yahoo Finance), y cada compra se comprueba con el precio de ese día.${WEB ? ' Los precios en directo llegan sin intermediarios. En la versión web, el histórico (gráfico y precio de cada compra) pasa por un intermediario público porque Yahoo no permite esas consultas desde el navegador.' : ''}</p>
+      <p>Acciones, ETF, fondos indexados y cripto se valoran con el precio real del mercado, y cada compra se comprueba con el precio de ese día. Cada tipo de activo usa la fuente más fiable disponible gratis:</p>
+      <ul class="tiny source-list">
+        <li><b>Cripto:</b> Coinbase Exchange, en tiempo real y sin clave.</li>
+        <li><b>Acciones y ETF de EE. UU.:</b> Finnhub, en tiempo real con una clave gratuita (abajo).${s.finnhubKey ? ' Activo.' : ' Sin clave se usa Yahoo Finance.'}</li>
+        <li><b>Cambio de divisas:</b> tipos oficiales del Banco Central Europeo.</li>
+        <li><b>ETF europeos y fondos indexados:</b> Yahoo Finance como respaldo. No existe una fuente oficial gratuita en directo para estas bolsas, y los fondos solo publican un valor liquidativo al día.</li>
+      </ul>${WEB ? '<p class="tiny">Coinbase, Finnhub y el BCE se consultan directamente desde tu navegador. Solo las consultas a Yahoo (histórico y bolsas europeas) pasan por un intermediario público.</p>' : ''}
       <div class="setting-row">
         <div><h3>Precios automáticos</h3><p>En directo mientras la app está abierta: acciones, ETF y cripto se actualizan en cuanto cambian (en horario de mercado) y los fondos con su valor diario. Desactivado, solo se consulta cuando pulsas Actualizar o registras una operación.</p></div>
         <div class="seg" role="group" aria-label="Precios automáticos">
@@ -1997,6 +2003,11 @@ function viewAjustes() {
         <div><h3>Actualizar ahora</h3><p>${s.pricesRefreshedAt ? `Última consulta: ${esc(new Date(s.pricesRefreshedAt).toLocaleString(locale(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}.` : 'Aún no se ha consultado ninguna cotización.'}</p></div>
         <button class="btn btn-ghost btn-sm" type="button" data-action="refresh-prices">${icon('refresh', 14)} Actualizar</button>
       </div>
+      <form class="setting-row" data-finnhub-form>
+        <div><h3>Clave de Finnhub (gratis)</h3><p>Para ver acciones y ETF de EE. UU. (Apple, S&amp;P 500…) al segundo. Crea una cuenta gratuita en <a href="https://finnhub.io/register" target="_blank" rel="noopener">finnhub.io</a>, copia tu «API key» y pégala aquí. Se guarda solo en este dispositivo.</p>
+          <input class="input" name="finnhubKey" type="text" autocomplete="off" spellcheck="false" placeholder="Pega tu clave de Finnhub" value="${esc(s.finnhubKey || '')}" style="margin-top:8px"></div>
+        <button class="btn btn-ghost btn-sm" type="submit">Guardar</button>
+      </form>
       ${WEB ? `<form class="setting-row" data-proxy-form>
         <div><h3>Intermediario propio (opcional)</h3><p>Si el público falla a menudo, pega aquí la dirección de tu propio intermediario (en el README hay uno listo para Cloudflare, gratis). Usa <code>{url}</code> donde va la consulta o se añadirá al final.</p>
           <input class="input" name="marketProxy" type="url" placeholder="https://mi-proxy.workers.dev/?url=" value="${esc(s.marketProxy || '')}" style="margin-top:8px"></div>
@@ -3334,6 +3345,18 @@ async function resetData() {
 
 /* ---------------------------------------------------------------- acciones */
 document.addEventListener('submit', async (event) => {
+  const finnhub = event.target.closest?.('[data-finnhub-form]');
+  if (finnhub) {
+    event.preventDefault();
+    try {
+      const data = await api('PATCH', 'api/settings', { finnhubKey: finnhub.querySelector('[name="finnhubKey"]').value.trim() });
+      if (data?.settings) store.data.settings = data.settings;
+      syncLive();
+      render();
+      toast(store.data.settings.finnhubKey ? 'Clave guardada. Las acciones de EE. UU. irán en directo con Finnhub.' : 'Clave quitada. Se usará Yahoo Finance de respaldo.');
+    } catch (err) { toast(err.message, 'error'); }
+    return;
+  }
   const form = event.target.closest?.('[data-proxy-form]');
   if (!form) return;
   event.preventDefault();
@@ -4200,14 +4223,33 @@ async function maybeAutoRefreshPrices() {
 
 
 /* ---------------------------------------------------------------- precios en directo
-   Yahoo Finance emite los precios por WebSocket (wss://streamer.finance.yahoo.com). Los WebSocket no
-   tienen la restricción CORS de las peticiones normales, así que funciona igual en la versión local y en
-   la web, sin intermediarios ni coste. Los mensajes vienen en protobuf (base64); aquí se lee lo justo. */
-const LIVE_URL = 'wss://streamer.finance.yahoo.com/?version=2';
-const live = { ws: null, key: '', quotes: new Map(), fx: new Map(), retry: 0, timer: null, renderTimer: null, lastRender: 0, connected: false };
-const LIVE_SINT = new Set([3, 9, 14, 19, 21, 22, 24, 26, 27, 28, 29]);
+   Cada tipo de activo usa la fuente más oficial que se puede consultar gratis desde el navegador
+   (los WebSocket no tienen la restricción CORS, así que no hace falta intermediario):
+   - Cripto: Coinbase Exchange, canal público «ticker» (sin clave).
+   - Acciones y ETF de EE. UU.: Finnhub, operaciones en tiempo real (clave gratuita en Ajustes).
+   - Lo demás (bolsas europeas): canal de Yahoo Finance como respaldo, porque no hay fuente oficial gratuita.
+   Los fondos publican un valor liquidativo al día y no se siguen en directo. */
+const CRYPTO_LIVE_RE = /^([A-Z0-9]{2,10})-(EUR|USD|GBP|USDC|USDT)$/;
+const US_LIVE_RE = /^[A-Z]{1,5}$/;
+const live = { feeds: {}, quotes: new Map(), renderTimer: null, lastRender: 0 };
 
-function decodeLiveTick(b64) {
+function liveRoute(inv) {
+  if (!marketLinked(inv) || inv.type === 'fund') return null;
+  const sym = String(inv.quoteSymbol).toUpperCase();
+  if (inv.type === 'crypto' && CRYPTO_LIVE_RE.test(sym)) return 'coinbase';
+  if (US_LIVE_RE.test(sym) && store.data?.settings?.finnhubKey) return 'finnhub';
+  return 'yahoo';
+}
+function usRegularSession(ms = Date.now()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: 'numeric', hour12: false })
+    .formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
+  if (parts.weekday === 'Sat' || parts.weekday === 'Sun') return false;
+  const min = (Number(parts.hour) % 24) * 60 + Number(parts.minute);
+  return min >= 570 && min < 960; // 9:30 a 16:00 en Nueva York
+}
+
+const LIVE_SINT = new Set([3, 9, 14, 19, 21, 22, 24, 26, 27, 28, 29]);
+function decodeYahooTick(b64) {
   let bytes;
   try { bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)); } catch { return null; }
   const view = new DataView(bytes.buffer);
@@ -4225,60 +4267,79 @@ function decodeLiveTick(b64) {
       const key = Number(varint());
       const field = key >> 3;
       const wire = key & 7;
-      if (wire === 0) {
-        const raw = varint();
-        out[field] = LIVE_SINT.has(field) ? Number((raw >> 1n) ^ -(raw & 1n)) : Number(BigInt.asIntN(64, raw));
-      } else if (wire === 5) { out[field] = view.getFloat32(i, true); i += 4; }
+      if (wire === 0) { const raw = varint(); out[field] = LIVE_SINT.has(field) ? Number((raw >> 1n) ^ -(raw & 1n)) : Number(BigInt.asIntN(64, raw)); }
+      else if (wire === 5) { out[field] = view.getFloat32(i, true); i += 4; }
       else if (wire === 1) { out[field] = view.getFloat64(i, true); i += 8; }
       else if (wire === 2) { const len = Number(varint()); out[field] = new TextDecoder().decode(bytes.subarray(i, i + len)); i += len; }
       else break;
     }
   } catch { return null; }
   if (!out[1] || !(out[2] > 0)) return null;
-  // 7 = horario: 1 es sesión regular. Fuera de ella (preapertura, after-hours) no se toca la valoración.
-  // 6 = tipo: 41 cripto y 14 divisa cotizan siempre.
-  const always = out[6] === 41 || out[6] === 14;
-  return { symbol: String(out[1]).toUpperCase(), price: out[2], at: out[3] || Date.now(), changePct: out[8], fund: out[6] === 24, regular: always || out[7] === 1 || out[7] === undefined };
+  // 7 = horario (1 sesión regular); 6 = tipo (24 fondo). Fuera de sesión no se toca la valoración.
+  if (out[6] === 24 || !(out[7] === 1 || out[7] === undefined)) return null;
+  return { symbol: String(out[1]).toUpperCase(), price: out[2], at: out[3] || Date.now() };
 }
 
-function liveTargets() {
-  if (!store.data || store.data.settings?.autoPrices === false) return [];
-  const target = currencyCode();
-  const symbols = new Set();
-  for (const inv of store.data.investments || []) {
-    if (!marketLinked(inv) || inv.type === 'fund') continue; // los fondos publican un valor al día
-    symbols.add(String(inv.quoteSymbol).toUpperCase());
-    const nc = String(inv.nativeCurrency || '').toUpperCase();
-    if (nc && nc !== target && /^[A-Z]{3}$/.test(nc)) symbols.add(`${nc}${target}=X`);
+const LIVE_FEEDS = {
+  coinbase: {
+    label: 'Coinbase',
+    url: () => 'wss://ws-feed.exchange.coinbase.com',
+    open: (ws, symbols) => ws.send(JSON.stringify({ type: 'subscribe', product_ids: symbols, channels: ['ticker'] })),
+    parse(data) {
+      const m = JSON.parse(data);
+      if (m?.type !== 'ticker' || !m.product_id) return [];
+      return [{ symbol: String(m.product_id).toUpperCase(), price: Number(m.price), at: Date.parse(m.time) || Date.now() }];
+    }
+  },
+  finnhub: {
+    label: 'Finnhub',
+    url: () => `wss://ws.finnhub.io?token=${encodeURIComponent(store.data?.settings?.finnhubKey || '')}`,
+    open: (ws, symbols) => { for (const symbol of symbols) ws.send(JSON.stringify({ type: 'subscribe', symbol })); },
+    parse(data) {
+      const m = JSON.parse(data);
+      if (m?.type !== 'trade' || !Array.isArray(m.data)) return [];
+      const last = new Map();
+      for (const t of m.data) if (t && t.s && t.p > 0 && usRegularSession(t.t)) last.set(t.s, { symbol: String(t.s).toUpperCase(), price: Number(t.p), at: Number(t.t) || Date.now() });
+      return [...last.values()];
+    }
+  },
+  yahoo: {
+    label: 'Yahoo Finance',
+    url: () => 'wss://streamer.finance.yahoo.com/?version=2',
+    open: (ws, symbols) => ws.send(JSON.stringify({ subscribe: symbols })),
+    parse(data) {
+      const m = JSON.parse(data);
+      if (m?.type !== 'pricing' || typeof m.message !== 'string') return [];
+      const tick = decodeYahooTick(m.message);
+      return tick ? [tick] : [];
+    }
   }
-  return [...symbols].sort();
-}
+};
 
 /** Aplica el último precio en directo a una inversión (en memoria; el servidor guarda el de referencia). */
 function applyLiveTo(inv) {
-  if (!marketLinked(inv) || inv.type === 'fund') return false;
-  const tick = live.quotes.get(String(inv.quoteSymbol).toUpperCase());
-  if (!tick || !tick.regular || tick.fund) return false;
-  if (!inv.nativeCurrency) return false; // hasta tener una cotización de referencia no se sabe su moneda
+  const route = liveRoute(inv);
+  if (!route || !inv.nativeCurrency) return false;
+  const tick = live.quotes.get(`${route}:${String(inv.quoteSymbol).toUpperCase()}`);
+  if (!tick || !(tick.price > 0)) return false;
   if (tick.at <= (Date.parse(inv.priceAt || '') || 0) && !inv.live) return false;
-  const target = currencyCode();
-  const nc = String(inv.nativeCurrency || target).toUpperCase();
-  let native = tick.price;
   const refNative = Number(inv.nativePrice) || 0;
-  if (refNative > 0 && native / refNative > 50 && Math.abs(native / 100 / refNative - 1) < 0.3) native /= 100; // peniques (GBp)
-  let rate = nc === target ? 1 : live.fx.get(`${nc}${target}=X`) || 0;
-  if (!(rate > 0)) rate = refNative > 0 && inv.currentPrice > 0 ? inv.currentPrice / refNative : 0;
-  if (!(rate > 0)) return false;
+  const refPrice = Number(inv.currentPrice) || 0;
+  if (!(refNative > 0 && refPrice > 0)) return false;
+  let native = tick.price;
+  if (native / refNative > 50 && Math.abs(native / 100 / refNative - 1) < 0.3) native /= 100; // peniques (GBp)
+  const rate = refPrice / refNative; // tipo de cambio oficial del BCE de la última consulta
   const price = native * rate;
-  const ref = Number(inv.livePriceRef || inv.currentPrice) || 0;
-  if (ref > 0 && Math.abs(price / ref - 1) > 0.35) return false; // dato raro: se ignora
-  if (!inv.live) inv.livePriceRef = inv.currentPrice;
-  const changed = Math.abs(price - (Number(inv.currentPrice) || 0)) > 1e-9;
+  const anchor = Number(inv.livePriceRef || refPrice);
+  if (Math.abs(price / anchor - 1) > 0.35) return false; // dato raro: se ignora
+  if (!inv.live) inv.livePriceRef = refPrice;
+  const changed = Math.abs(price - refPrice) > 1e-9;
   inv.currentPrice = Math.round(price * 1e6) / 1e6;
   inv.nativePrice = Math.round(native * 1e6) / 1e6;
-  if (Number.isFinite(tick.changePct)) inv.dayChangePct = Math.round(tick.changePct * 100) / 100;
+  if (inv.prevClose > 0) inv.dayChangePct = Math.round((inv.currentPrice / inv.prevClose - 1) * 10000) / 100;
   inv.priceAt = new Date(tick.at).toISOString();
-  inv.live = true;
+  inv.priceSource = LIVE_FEEDS[route].label;
+  inv.live = route;
   return changed;
 }
 function applyLiveAll() {
@@ -4303,69 +4364,69 @@ function scheduleLiveRender() {
   }, wait);
 }
 
-function onLiveMessage(event) {
-  let msg;
-  try { msg = JSON.parse(event.data); } catch { return; }
-  if (!msg || msg.type !== 'pricing' || typeof msg.message !== 'string') return;
-  const tick = decodeLiveTick(msg.message);
-  if (!tick) return;
-  if (tick.symbol.endsWith('=X')) { live.fx.set(tick.symbol, tick.price); return; }
-  live.quotes.set(tick.symbol, tick);
-  const inv = (store.data?.investments || []).filter((i) => marketLinked(i) && String(i.quoteSymbol).toUpperCase() === tick.symbol);
+function onLiveTicks(route, ticks) {
   let changed = false;
-  for (const i of inv) if (applyLiveTo(i)) changed = true;
+  for (const tick of ticks) {
+    live.quotes.set(`${route}:${tick.symbol}`, tick);
+    for (const inv of store.data?.investments || []) {
+      if (String(inv.quoteSymbol || '').toUpperCase() === tick.symbol && liveRoute(inv) === route && applyLiveTo(inv)) changed = true;
+    }
+  }
   if (changed) scheduleLiveRender();
 }
 
-function stopLive() {
-  clearTimeout(live.timer);
-  live.timer = null;
-  if (live.ws) { live.ws.onclose = null; try { live.ws.close(); } catch { /* nada */ } }
-  live.ws = null;
-  live.key = '';
-  live.connected = false;
+function stopFeed(route) {
+  const f = live.feeds[route];
+  if (!f) return;
+  clearTimeout(f.timer);
+  if (f.ws) { f.ws.onclose = null; try { f.ws.close(); } catch { /* nada */ } }
+  delete live.feeds[route];
 }
-/** Abre (o ajusta) la conexión en directo según las inversiones vinculadas. */
-function syncLive() {
-  if (typeof WebSocket !== 'function') return;
-  const targets = document.hidden || store.offline ? [] : liveTargets();
-  const key = targets.join(',');
-  if (!targets.length) { if (live.ws) stopLive(); return; }
-  if (live.ws && live.key === key && live.ws.readyState <= 1) return;
-  if (live.ws && live.ws.readyState === 1) {
-    const prev = live.key.split(',').filter(Boolean);
-    const add = targets.filter((s) => !prev.includes(s));
-    const drop = prev.filter((s) => !targets.includes(s));
-    if (drop.length) live.ws.send(JSON.stringify({ unsubscribe: drop }));
-    if (add.length) live.ws.send(JSON.stringify({ subscribe: add }));
-    live.key = key;
-    return;
-  }
-  stopLive();
+function stopLive() { for (const route of Object.keys(live.feeds)) stopFeed(route); }
+
+function openFeed(route, symbols, key) {
+  const def = LIVE_FEEDS[route];
+  const prev = live.feeds[route];
+  const f = { key, ws: null, timer: null, connected: false, retry: prev?.retry || 0 };
+  stopFeed(route);
+  live.feeds[route] = f;
   let ws;
-  try { ws = new WebSocket(LIVE_URL); } catch { return; }
-  live.ws = ws;
-  live.key = key;
-  ws.onopen = () => {
-    live.retry = 0;
-    live.connected = true;
-    ws.send(JSON.stringify({ subscribe: targets }));
-    if (store.view === 'inversiones') scheduleLiveRender();
-  };
-  ws.onmessage = onLiveMessage;
+  try { ws = new WebSocket(def.url()); } catch { return; }
+  f.ws = ws;
+  ws.onopen = () => { f.retry = 0; f.connected = true; def.open(ws, symbols); if (store.view === 'inversiones') scheduleLiveRender(); };
+  ws.onmessage = (event) => { let ticks = []; try { ticks = def.parse(event.data); } catch { ticks = []; } if (ticks.length) onLiveTicks(route, ticks); };
   ws.onclose = () => {
-    live.ws = null;
-    live.key = '';
-    live.connected = false;
-    if (document.hidden) return;
-    live.retry = Math.min(live.retry + 1, 6);
-    clearTimeout(live.timer);
-    live.timer = setTimeout(syncLive, Math.min(60000, 1500 * 2 ** live.retry));
+    f.connected = false;
+    f.ws = null;
+    if (live.feeds[route] !== f || document.hidden) return;
+    f.retry = Math.min(f.retry + 1, 6);
+    f.timer = setTimeout(() => { if (live.feeds[route] === f) { f.key = ''; syncLive(); } }, Math.min(60000, 1500 * 2 ** f.retry));
   };
   ws.onerror = () => { /* onclose se encarga de reintentar */ };
 }
+
+/** Abre, ajusta o cierra cada canal según las inversiones vinculadas. */
+function syncLive() {
+  if (typeof WebSocket !== 'function') return;
+  const want = { coinbase: new Set(), finnhub: new Set(), yahoo: new Set() };
+  if (store.data && store.data.settings?.autoPrices !== false && !document.hidden && !store.offline) {
+    for (const inv of store.data.investments || []) {
+      const route = liveRoute(inv);
+      if (route) want[route].add(String(inv.quoteSymbol).toUpperCase());
+    }
+  }
+  for (const route of Object.keys(want)) {
+    const symbols = [...want[route]].sort();
+    const key = route === 'finnhub' ? `${symbols.join(',')}|${store.data?.settings?.finnhubKey || ''}` : symbols.join(',');
+    if (!symbols.length) { stopFeed(route); continue; }
+    const f = live.feeds[route];
+    if (f && f.key === key && (f.ws || f.timer)) continue;
+    openFeed(route, symbols, key);
+  }
+}
+function liveConnected() { return Object.values(live.feeds).some((f) => f.connected); }
 function liveLabel(h) {
-  return h.live && live.connected && Date.now() - (Date.parse(h.priceAt || '') || 0) < 10 * 60 * 1000;
+  return Boolean(h.live) && live.feeds[h.live]?.connected && Date.now() - (Date.parse(h.priceAt || '') || 0) < 10 * 60 * 1000;
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) stopLive(); else syncLive(); });
 window.addEventListener('online', () => syncLive());
