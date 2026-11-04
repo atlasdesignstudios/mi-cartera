@@ -1394,3 +1394,14 @@ button:disabled { cursor: not-allowed; }
 .financial-insight-body a:hover { text-decoration:underline; text-underline-offset:3px; }
 .financial-insights-foot { margin:0; color:var(--muted-2); font-size:11px; }
 @media (max-width:560px) { .financial-insights-card .card-head { align-items:center; } .financial-insight { padding:12px; } }
+
+/* Ajuste: compara el capital aportado con el valor de mercado acumulado. */
+.invest-chart-line.cost { stroke:#e16f76; }
+.invest-chart-line.value.positive { stroke:#55b88f; }
+.invest-chart-line.value.negative { stroke:#e16f76; }
+.invest-chart-band { opacity:.13; }
+.invest-chart-band.positive { fill:#55b88f; }
+.invest-chart-band.negative { fill:#e16f76; }
+.invest-chart-point.cost { stroke:#e16f76; }
+.invest-chart-point.value.positive { stroke:#55b88f; }
+.invest-chart-point.value.negative { stroke:#e16f76; }
