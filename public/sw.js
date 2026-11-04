@@ -1,16 +1,20 @@
 // Service worker: caché primero para el shell estático y red primero para recursos dinámicos.
 // Cada publicación incrementa CACHE; la instalación precarga el shell actualizado antes de activarlo.
-const CACHE = 'micartera-v13';
+const CACHE = 'micartera-v14';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'fiscal.js', 'glyphs.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'fonts/inter-latin.woff2', 'vendor/qrcode.js'];
 const SHELL_URLS = new Set(SHELL.map((path) => new URL(path, self.registration.scope).href));
 
 self.addEventListener('install', (event) => {
+  // No se activa hasta que el usuario acepte la actualización.
+  // Si falla la precarga, la instalación falla y la versión actual sigue funcionando.
   event.waitUntil(
     caches.open(CACHE)
       .then((cache) => cache.addAll(SHELL.map((url) => new Request(url, { cache: 'reload' }))))
-      .catch(() => {})
   );
-  self.skipWaiting();
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
