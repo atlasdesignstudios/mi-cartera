@@ -2119,6 +2119,11 @@ async function handleApi(req, res, pathname) {
 
   if (!isAuthed(req)) throw new HttpError(401, 'Bloqueado. Introduce tu PIN.');
 
+  if (pathname === '/api/revision' && method === 'GET') {
+    runRecurringAndSave();
+    return json(res, 200, { rev: Number(db.rev) || 0 });
+  }
+
   if (pathname === '/api/state' && method === 'GET') {
     runRecurringAndSave();
     return json(res, 200, publicState());
