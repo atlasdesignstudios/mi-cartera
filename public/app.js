@@ -1256,6 +1256,24 @@ function portfolioDay(holdings) {
   return base > 0 ? { change: round(change), pct: (change / base) * 100 } : null;
 }
 
+function investmentCompositionChart(totals) {
+  const cost = Math.max(0, Number(totals.cost) || 0);
+  const gain = Number(totals.pnl) || 0;
+  const total = Math.max(0, cost + gain);
+  const contributionPct = total > 0 ? cost / total * 100 : 0;
+  const gainWidth = gain >= 0 ? Math.max(0, 100 - contributionPct) : Math.min(100, cost > 0 ? Math.abs(gain) / cost * 100 : 0);
+  return `<section class="card invest-chart-card" aria-label="Gráfica de aportaciones y ganancias">
+    <div class="card-head"><div><h2>Aportado y ganancia</h2><p>Cómo se compone el valor actual de tu cartera</p></div><span class="invest-chart-total">${esc(money(total))}</span></div>
+    <div class="invest-chart-track" role="img" aria-label="Aportado ${esc(money(cost))}; ganancia no realizada ${esc(money(gain))}">
+      <span class="invest-chart-contributed" style="width:${gain < 0 ? 100 : clamp(contributionPct, 0, 100)}%"></span>
+      ${gain >= 0 ? `<span class="invest-chart-gain" style="width:${gainWidth}%"></span>` : `<span class="invest-chart-loss" style="width:${gainWidth}%"></span>`}
+    </div>
+    <div class="invest-chart-legend">
+      <div><i class="invest-chart-dot contributed"></i><span>Aportado</span><b>${esc(money(cost))}</b></div>
+      <div><i class="invest-chart-dot ${gain < 0 ? 'loss' : 'gain'}"></i><span>${gain < 0 ? 'Pérdida no realizada' : 'Ganancia no realizada'}</span><b class="${gain < 0 ? 'num-down' : 'num-up'}">${gain > 0 ? '+' : ''}${esc(money(gain))}</b></div>
+    </div>
+  </section>`;
+}
 function viewInversiones() {
   const holdings = computeHoldings().sort((a, b) => b.value - a.value);
   const totals = portfolioTotals(holdings);
@@ -1300,6 +1318,8 @@ function viewInversiones() {
       <div class="hero-caption"><span>Distribución por tipo de activo</span><b>${alloc.length}</b></div>
     </div>
   </section>
+
+  ${investmentCompositionChart(totals)}
 
   <div class="holding-grid">${holdings.map(holdingCard).join('')}</div>
 
