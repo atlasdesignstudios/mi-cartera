@@ -1359,3 +1359,20 @@ button:disabled { cursor: not-allowed; }
 .invest-chart-dot.gain { background: #4f9a7f; }
 .invest-chart-dot.loss { background: #c46b70; }
 @media (max-width: 560px) { .invest-chart-legend { grid-template-columns: 1fr; } }
+
+/* Gráfica de aportaciones y beneficio en Inversiones. */
+.invest-chart-card { gap: 14px; }
+.invest-chart-total { color: var(--text); font-size: 15px; font-weight: 560; font-variant-numeric: tabular-nums; }
+.invest-chart-legend { display:flex; flex-wrap:wrap; gap:12px 22px; color:var(--muted); font-size:13px; }
+.invest-chart-legend span { display:inline-flex; align-items:center; gap:8px; }
+.invest-chart-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#e16f76; flex:0 0 auto; }
+.invest-chart-dot.gain { background:#55b88f; } .invest-chart-dot.loss { background:#e16f76; }
+.invest-chart-scroll { width:100%; overflow-x:auto; }
+.invest-chart-svg { display:block; width:100%; min-width:460px; height:auto; overflow:visible; }
+.invest-chart-gridline { stroke:var(--border); stroke-width:1; opacity:.75; }
+.invest-chart-tick { fill:var(--muted); font-size:11px; }
+.invest-chart-line { fill:none; stroke:#e16f76; stroke-width:2.7; stroke-linecap:round; stroke-linejoin:round; }
+.invest-chart-line.gain { stroke:#55b88f; } .invest-chart-line.gain.loss { stroke:#e16f76; }
+.invest-chart-area { opacity:.08; } .invest-chart-area.cost { fill:#e16f76; } .invest-chart-area.gain { fill:#55b88f; }
+.invest-chart-point { fill:var(--surface); stroke:#e16f76; stroke-width:2; } .invest-chart-point.gain { stroke:#55b88f; }
+.invest-chart-note { margin:0; color:var(--muted); font-size:12px; }
