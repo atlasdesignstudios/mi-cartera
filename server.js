@@ -234,10 +234,17 @@ function verifyPin(pin, stored) {
 const sessions = new Map();
 const loginAttempts = new Map();
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const MAX_LOGIN_ATTEMPT_IPS = 1000;
 
 function createSession() {
+  const now = Date.now();
+  // Las sesiones caducadas no deben acumularse indefinidamente en memoria.
+  for (const [sid, expiresAt] of sessions) {
+    if (expiresAt <= now) sessions.delete(sid);
+  }
   const sid = crypto.randomBytes(24).toString('hex');
-  sessions.set(sid, Date.now() + SESSION_MS);
+  sessions.set(sid, now + SESSION_MS);
   return sid;
 }
 function cookieHeader(sid) {
@@ -268,15 +275,25 @@ function clientIp(req) {
 function loginBlocked(ip) {
   const entry = loginAttempts.get(ip);
   if (!entry) return false;
-  if (entry.first + 10 * 60 * 1000 < Date.now()) {
+  if (entry.first + LOGIN_WINDOW_MS < Date.now()) {
     loginAttempts.delete(ip);
     return false;
   }
   return entry.count >= 10;
 }
 function registerFailure(ip) {
+  const now = Date.now();
+  // Limpia IPs cuyo periodo de bloqueo ya terminó y limita el estado en memoria
+  // ante peticiones distribuidas que roten direcciones de origen.
+  for (const [address, entry] of loginAttempts) {
+    if (entry.first + LOGIN_WINDOW_MS < now) loginAttempts.delete(address);
+  }
+  if (!loginAttempts.has(ip) && loginAttempts.size >= MAX_LOGIN_ATTEMPT_IPS) {
+    const oldest = loginAttempts.keys().next().value;
+    if (oldest !== undefined) loginAttempts.delete(oldest);
+  }
   const entry = loginAttempts.get(ip);
-  if (!entry || entry.first + 10 * 60 * 1000 < Date.now()) loginAttempts.set(ip, { count: 1, first: Date.now() });
+  if (!entry || entry.first + LOGIN_WINDOW_MS < now) loginAttempts.set(ip, { count: 1, first: now });
   else entry.count += 1;
 }
 

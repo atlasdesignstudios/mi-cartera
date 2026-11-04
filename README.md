@@ -59,6 +59,16 @@ Puedes abrirla como página web en **https://atlasdesignstudios.github.io/mi-car
 - Si borras los datos del navegador, se pierden: usa **Exportar** a menudo. Las copias son compatibles con la versión local (puedes pasar datos de una a otra con Exportar/Importar).
 - Se publica sola con cada `push` a `main` (`.github/workflows/pages.yml`). Para generarla a mano: `node scripts/build-web.js` (crea `dist/`).
 
+## Desarrollo y pruebas
+
+Requisitos: Node.js 20 o superior.
+
+- Ejecutar las pruebas automatizadas: `npm test`.
+- Generar la versión web localmente: `npm run build:web` (crea `dist/`).
+- Comprobar la sintaxis de los módulos principales: `node --check server.js`, `node --check public/app.js` y `node --check dist/local-api.js`.
+
+GitHub Actions ejecuta las pruebas, genera la versión web y comprueba la sintaxis antes de publicar. Las solicitudes de cambio hacia `main` ejecutan las mismas comprobaciones sin desplegar la web.
+
 ## Usarla desde el móvil
 
 1. Arranca el servidor en el ordenador.
