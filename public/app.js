@@ -846,6 +846,43 @@ function budgetMiniRow(row) {
   </div>`;
 }
 
+function financialInsights(month, budgets, upcomingNet, upcoming) {
+  const items = [];
+  const transactions = store.data?.transactions || [];
+  const monthExpenses = transactions.filter((tx) => tx.type === 'expense' && monthKey(tx.date) === month);
+  const monthIncome = transactions.filter((tx) => tx.type === 'income' && monthKey(tx.date) === month);
+  const income = round(sum(monthIncome, (tx) => Number(tx.amount) || 0));
+  const expense = round(sum(monthExpenses, (tx) => Number(tx.amount) || 0));
+  if (income > 0 && expense > income) {
+    items.push({ tone: 'warning', icon: 'alert', title: 'Estás gastando más de lo que ingresas', text: `Este mes llevas ${money(expense - income)} más de gastos que de ingresos. Revisa los movimientos y tus límites.`, href: '#/movimientos', link: 'Revisar movimientos' });
+  }
+  const exceeded = budgets.filter((b) => b.remaining < 0).sort((a, b) => a.remaining - b.remaining);
+  for (const b of exceeded.slice(0, 2)) items.push({ tone: 'warning', icon: 'alert', title: `Presupuesto de ${b.name} superado`, text: `Has sobrepasado el límite en ${money(Math.abs(b.remaining))}. Puedes ajustar el presupuesto o revisar sus gastos.`, href: '#/presupuestos', link: 'Ver presupuesto' });
+  const near = budgets.filter((b) => b.remaining >= 0 && b.pct >= 0.8).sort((a, b) => b.pct - a.pct);
+  for (const b of near.slice(0, 2)) items.push({ tone: 'caution', icon: 'target', title: `Presupuesto de ${b.name} casi agotado`, text: `Ya has utilizado el ${percent(b.pct, 0)} y te quedan ${money(b.remaining)} este mes.`, href: '#/presupuestos', link: 'Controlar presupuesto' });
+  if (upcoming.length && upcomingNet < 0) {
+    const outflow = round(sum(upcoming.filter((u) => u.rule.type === 'expense'), (u) => Number(u.rule.amount) || 0));
+    const inflow = round(sum(upcoming.filter((u) => u.rule.type === 'income'), (u) => Number(u.rule.amount) || 0));
+    if (outflow > inflow) items.push({ tone: 'info', icon: 'calendar', title: 'Más pagos que cobros previstos', text: `En los próximos 30 días tienes ${money(outflow)} en pagos y ${money(inflow)} en cobros recurrentes.`, href: '#/recurrentes', link: 'Ver próximos movimientos' });
+  }
+  if (!items.length && (transactions.length || (store.data?.accounts || []).length)) {
+    const savingsRate = income > 0 ? (income - expense) / income : 0;
+    if (income > 0 && savingsRate >= 0.2) items.push({ tone: 'positive', icon: 'trend', title: 'Buen ritmo de ahorro', text: `Este mes estás guardando el ${percent(savingsRate, 0)} de tus ingresos. Mantener ese ritmo puede ayudarte a alcanzar tus objetivos.`, href: '#/objetivos', link: 'Ver objetivos' });
+  }
+  if (!items.length) items.push({ tone: 'neutral', icon: 'sparkles', title: 'Tu análisis financiero está preparado', text: 'A medida que registres ingresos, gastos y presupuestos, aparecerán aquí avisos y oportunidades basados en tus datos.', href: '#/movimientos', link: 'Añadir movimiento' });
+  return items.slice(0, 3);
+}
+
+function financialInsightsCard(items) {
+  return `<section class="card financial-insights-card">
+    <div class="card-head"><div><h2>Análisis inteligente</h2><p>Señales y oportunidades detectadas en tus datos</p></div><span class="ai-mark">${icon('sparkles', 16)} Análisis</span></div>
+    <div class="financial-insights-list">${items.map((item) => `<article class="financial-insight ${item.tone}">
+      <span class="financial-insight-icon">${icon(item.icon, 17)}</span>
+      <div class="financial-insight-body"><b>${esc(item.title)}</b><p>${esc(item.text)}</p><a href="${item.href}">${esc(item.link)} ${icon('arrowRight', 13)}</a></div>
+    </article>`).join('')}</div>
+    <p class="financial-insights-foot">Análisis automático basado en los movimientos y datos registrados. No constituye asesoramiento financiero.</p>
+  </section>`;
+}
 /* ---------------------------------------------------------------- vista: resumen */
 function pairCards(cards) {
   const list = cards.filter(Boolean);
@@ -871,6 +908,7 @@ function viewResumen() {
   const upcoming = upcomingOccurrences(30);
   const upcomingNet = round(sum(upcoming, (u) => (u.rule.type === 'income' ? u.rule.amount : u.rule.type === 'expense' ? -u.rule.amount : 0)));
   const goals = (store.data.goals || []).map(goalProgress).sort((a, b) => a.reached - b.reached);
+  const insights = financialInsights(now, budgetProgress(now).filter((b) => b.budget > 0), upcomingNet, upcoming);
 
   return `
   ${store.offline ? `<div class="banner">${icon('alert', 17)}<span><b>Sin conexión.</b> Estás viendo la última copia guardada en este dispositivo.</span></div>` : ''}
@@ -898,6 +936,8 @@ function viewResumen() {
 
   ${firstStepsCard()}
   ${businessSummaryHTML()}
+  ${financialInsightsCard(insights)}
+
   <div class="statgrid">
     ${statCard('Ingresos del mes', bigMoney(stats.income), `${deltaBadge(stats.income, prev.income)} <span>vs. mes anterior</span>`, 'income', 'arrowUp')}
     ${statCard('Gastos del mes', bigMoney(stats.expense), `${deltaBadge(stats.expense, prev.expense, true)} <span>vs. mes anterior</span>`, 'expense', 'wallet')}
