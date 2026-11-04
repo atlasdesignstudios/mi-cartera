@@ -1256,22 +1256,31 @@ function portfolioDay(holdings) {
   return base > 0 ? { change: round(change), pct: (change / base) * 100 } : null;
 }
 
-function investmentCompositionChart(totals) {
-  const cost = Math.max(0, Number(totals.cost) || 0);
-  const gain = Number(totals.pnl) || 0;
-  const total = Math.max(0, cost + gain);
-  const contributionPct = total > 0 ? cost / total * 100 : 0;
-  const gainWidth = gain >= 0 ? Math.max(0, 100 - contributionPct) : Math.min(100, cost > 0 ? Math.abs(gain) / cost * 100 : 0);
-  return `<section class="card invest-chart-card" aria-label="Gráfica de aportaciones y ganancias">
-    <div class="card-head"><div><h2>Aportado y ganancia</h2><p>Cómo se compone el valor actual de tu cartera</p></div><span class="invest-chart-total">${esc(money(total))}</span></div>
-    <div class="invest-chart-track" role="img" aria-label="Aportado ${esc(money(cost))}; ganancia no realizada ${esc(money(gain))}">
-      <span class="invest-chart-contributed" style="width:${gain < 0 ? 100 : clamp(contributionPct, 0, 100)}%"></span>
-      ${gain >= 0 ? `<span class="invest-chart-gain" style="width:${gainWidth}%"></span>` : `<span class="invest-chart-loss" style="width:${gainWidth}%"></span>`}
-    </div>
-    <div class="invest-chart-legend">
-      <div><i class="invest-chart-dot contributed"></i><span>Aportado</span><b>${esc(money(cost))}</b></div>
-      <div><i class="invest-chart-dot ${gain < 0 ? 'loss' : 'gain'}"></i><span>${gain < 0 ? 'Pérdida no realizada' : 'Ganancia no realizada'}</span><b class="${gain < 0 ? 'num-down' : 'num-up'}">${gain > 0 ? '+' : ''}${esc(money(gain))}</b></div>
-    </div>
+function investmentCompositionChart(holdings, totals) {
+  const rows = [...holdings].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  const costTotal = Math.max(0, Number(totals.cost) || 0);
+  const gainTotal = Number(totals.pnl) || 0;
+  const gainColor = gainTotal >= 0 ? '#55b88f' : '#e16f76';
+  const width = 720, height = 230, left = 48, right = 18, top = 18, bottom = 42;
+  const plotW = width - left - right, plotH = height - top - bottom;
+  let runningCost = 0, runningGain = 0;
+  const points = rows.map((h, i) => { runningCost += Number(h.cost) || 0; runningGain += Number(h.pnl) || 0; return { name: String(h.name || 'Inversión'), cost: runningCost, gain: runningGain, i }; });
+  const maxVal = Math.max(1, ...points.map(p => Math.max(p.cost, p.gain, 0)), costTotal, gainTotal, 0) * 1.08;
+  const x = i => left + (points.length <= 1 ? plotW / 2 : i * plotW / (points.length - 1));
+  const y = v => top + plotH - (Math.max(0, v) / maxVal) * plotH;
+  const path = key => points.map((p, i) => `${i ? 'L' : 'M'} ${x(i).toFixed(1)} ${y(p[key]).toFixed(1)}`).join(' ');
+  const area = key => points.length ? `${path(key)} L ${x(points.length - 1).toFixed(1)} ${y(0).toFixed(1)} L ${x(0).toFixed(1)} ${y(0).toFixed(1)} Z` : '';
+  const ticks = [0, .5, 1].map(t => `<line x1="${left}" x2="${width-right}" y1="${(top+plotH*(1-t)).toFixed(1)}" y2="${(top+plotH*(1-t)).toFixed(1)}" class="invest-chart-gridline"/><text x="${left-9}" y="${(top+plotH*(1-t)+4).toFixed(1)}" text-anchor="end" class="invest-chart-tick">${esc(money(maxVal*t))}</text>`).join('');
+  const labels = points.map((p,i) => `<text x="${x(i).toFixed(1)}" y="${height-12}" text-anchor="middle" class="invest-chart-tick">${esc(p.name.length > 12 ? p.name.slice(0,11)+'…' : p.name)}</text>`).join('');
+  const dots = key => points.map((p,i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="3.8" class="invest-chart-point ${key}"/><title>${esc(p.name)}: ${esc(money(p[key]))}</title>`).join('');
+  return `<section class="card invest-chart-card" aria-label="Gráfica de aportaciones y beneficio acumulados">
+    <div class="card-head"><div><h2>Aportaciones y beneficio</h2><p>Capital aportado y resultado acumulado por inversión</p></div><span class="invest-chart-total">${esc(money(costTotal + gainTotal))}</span></div>
+    <div class="invest-chart-legend"><span><i class="invest-chart-dot contributed"></i>Aportado · ${esc(money(costTotal))}</span><span><i class="invest-chart-dot ${gainTotal >= 0 ? 'gain' : 'loss'}"></i>${gainTotal >= 0 ? 'Beneficio' : 'Pérdida'} · ${gainTotal > 0 ? '+' : ''}${esc(money(gainTotal))}</span></div>
+    <div class="invest-chart-scroll"><svg class="invest-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Evolución acumulada de aportaciones y beneficio por inversión">
+      ${ticks}
+      ${points.length ? `<path d="${area('cost')}" class="invest-chart-area cost"/><path d="${area('gain')}" class="invest-chart-area gain"/><path d="${path('cost')}" class="invest-chart-line cost"/><path d="${path('gain')}" class="invest-chart-line gain ${gainTotal < 0 ? 'loss' : ''}"/>${dots('cost')}${dots('gain')}${labels}` : ''}
+    </svg></div>
+    <p class="invest-chart-note">Cada punto añade una inversión a la suma acumulada; los importes se calculan con los datos actuales.</p>
   </section>`;
 }
 function viewInversiones() {
@@ -1319,7 +1328,7 @@ function viewInversiones() {
     </div>
   </section>
 
-  ${investmentCompositionChart(totals)}
+  ${investmentCompositionChart(holdings, totals)}
 
   <div class="holding-grid">${holdings.map(holdingCard).join('')}</div>
 
