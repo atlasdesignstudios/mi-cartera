@@ -15,7 +15,7 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const PORT = Number(process.env.PORT) || 4321;
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 let LISTEN_PORT = PORT;
 
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -1484,7 +1484,14 @@ async function marketFetchJson(url) {
 async function marketJson(url, ttlMs) {
   const hit = marketCache.get(url);
   if (hit && Date.now() - hit.at < ttlMs) return hit.body;
-  const body = await marketFetchJson(url);
+  let body;
+  try {
+    body = await marketFetchJson(url);
+  } catch (err) {
+    // Si el servicio no responde, mejor el último dato bueno (de menos de 3 días) que un error.
+    if (err.network && hit && Date.now() - hit.at < 3 * 86400000) return hit.body;
+    throw err;
+  }
   marketCache.set(url, { at: Date.now(), body });
   if (marketCache.size > 300) marketCache.delete(marketCache.keys().next().value);
   return body;
@@ -1816,6 +1823,11 @@ async function prepareMarketInvestment(body, prev = null) {
   try {
     q = await marketQuote(symbol, db.settings.currency || 'EUR');
   } catch (err) {
+    if (err.network || /conexi|intermediario|responde/i.test(String(err.message))) {
+      // El mercado no responde ahora: se crea vinculada y sin precio; se completa sola en la siguiente consulta.
+      Object.assign(out, { currentPrice: 0, priceAt: null, prevClose: null, dayChangePct: null, nativePrice: null, spark: [] });
+      return out;
+    }
     throw bad(`No se pudo obtener la cotización de ${symbol}: ${err.message}`);
   }
   Object.assign(out, quoteFields(q));

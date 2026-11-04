@@ -4,7 +4,7 @@ import * as F from './fiscal.js';
 import { GLYPHS, glyphSVG, normalizeGlyph } from './glyphs.js';
 
 const STORAGE_KEY = 'micartera.state.v1';
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.7.1';
 // En la versión web (GitHub Pages) no hay servidor: los datos viven en este navegador.
 const WEB = Boolean(globalThis.MC_WEB);
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'MXN', 'ARS', 'COP', 'CLP', 'PEN', 'BRL', 'UYU', 'JPY'];
@@ -286,10 +286,12 @@ function computeHoldings() {
     units = Math.max(0, round(units, 8));
     cost = Math.max(0, round(cost, 2));
     realized = round(realized, 2);
-    const value = round(units * (Number(inv.currentPrice) || 0));
+    // Vinculada al mercado pero aún sin precio (el servicio no respondió): se valora a coste hasta que llegue.
+    const pricePending = marketLinked(inv) && !(Number(inv.currentPrice) > 0);
+    const value = pricePending ? cost : round(units * (Number(inv.currentPrice) || 0));
     const pnl = round(value - cost);
     return {
-      ...inv, ops: list, units, cost, realized, value, pnl,
+      ...inv, ops: list, units, cost, realized, value, pnl, pricePending,
       avg: units > 0 ? cost / units : 0,
       pnlPct: cost > 0 ? pnl / cost : 0
     };
@@ -652,7 +654,7 @@ async function boot() {
       return;
     }
     setTimeout(maybeAutoRefreshPrices, 1500);
-    if (!boot.priceTimer) boot.priceTimer = setInterval(maybeAutoRefreshPrices, 5 * 60 * 1000);
+    if (!boot.priceTimer) boot.priceTimer = setInterval(maybeAutoRefreshPrices, 60 * 1000);
   } catch (err) {
     if (!document.getElementById('lock')?.hidden) return;
     const cached = readCache();
@@ -1203,12 +1205,12 @@ function holdingCard(h) {
     ${linked ? `<div class="holding-market">
       <div class="holding-price">
         <span>Precio de mercado</span>
-        <b>${esc(money(h.currentPrice))}</b>
-        ${changeChip(h.dayChangePct, 'hoy')}
+        ${h.pricePending ? '<b class="price-pending">Pendiente</b>' : `<b>${esc(money(h.currentPrice))}</b>
+        ${changeChip(h.dayChangePct, 'hoy')}`}
       </div>
       ${sparkline(h.spark)}
     </div>
-    <p class="holding-src">${foreign ? `${esc(nativeMoney(h.nativePrice, h.nativeCurrency))} al cambio · ` : ''}${liveLabel(h) ? `<span class="live-dot"></span>En directo · ${esc(h.priceSource || 'mercado')}` : `${esc(h.priceSource || 'Mercado')} · ${esc(agoLabel(h.priceAt) || 'sin consultar')}`}</p>`
+    <p class="holding-src">${h.pricePending ? 'El servicio de cotizaciones no respondió. Se reintenta solo cada minuto; mientras, se valora a lo que pagaste.' : `${foreign ? `${esc(nativeMoney(h.nativePrice, h.nativeCurrency))} al cambio · ` : ''}${liveLabel(h) ? `<span class="live-dot"></span>En directo · ${esc(h.priceSource || 'mercado')}` : `${esc(h.priceSource || 'Mercado')} · ${esc(agoLabel(h.priceAt) || 'sin consultar')}`}`}</p>`
     : needsMarketLink(h) ? `<div class="holding-warn">${icon('alert', 15)}<span>Precio puesto a mano: puede no ser real. <button type="button" class="link-btn" data-action="edit-investment" data-id="${esc(h.id)}">Vincúlalo al mercado</button></span></div>` : ''}
     <dl class="metrics">
       <div><dt>Unidades</dt><dd>${esc(unitsLabel(h.units))}</dd></div>
@@ -2529,7 +2531,12 @@ function openInvestmentModal(investment = null) {
           if (picked?.symbol !== symbol) return;
           live.innerHTML = `<b>${esc(money(quote.price))}</b> ${changeChip(quote.dayChangePct, 'hoy')}`;
         } catch (err) {
-          live.innerHTML = `<span class="tiny">${esc(err.message)}</span>`;
+          if (picked?.symbol !== symbol) return;
+          const tips = [];
+          if (WEB && /^[A-Z]{1,5}$/.test(symbol) && !store.data.settings?.finnhubKey) tips.push('añade tu clave gratuita de Finnhub en Ajustes → Cotizaciones');
+          if (WEB && !store.data.settings?.marketProxy) tips.push(/^[A-Z]{1,5}$/.test(symbol) ? 'o pon tu propio intermediario gratuito' : 'pon tu propio intermediario gratuito en Ajustes → Cotizaciones');
+          live.innerHTML = `<span class="tiny">${esc(err.message)} Puedes crearla igualmente y el precio se cargará solo.${tips.length ? `<br>Para no depender de él: ${esc(tips.join('; '))}.` : ''}</span>
+            <button type="button" class="btn btn-sm btn-ghost" data-retry-quote>${icon('refresh', 13)} Reintentar</button>`;
         }
       };
       const pick = (r) => {
@@ -2584,6 +2591,7 @@ function openInvestmentModal(investment = null) {
         if (btn && found[Number(btn.dataset.pick)]) pick(found[Number(btn.dataset.pick)]);
       });
       pickedEl.addEventListener('click', (event) => {
+        if (event.target.closest('[data-retry-quote]')) { renderPicked(); return; }
         if (!event.target.closest('[data-unpick]')) return;
         picked = null;
         renderPicked();
@@ -2615,6 +2623,8 @@ function openInvestmentModal(investment = null) {
       if (investment) await api('PATCH', `api/investments/${investment.id}`, payload);
       else await api('POST', 'api/investments', payload);
       render();
+      const saved = isMarket() && (store.data.investments || []).find((i) => i.quoteSymbol === payload.quoteSymbol);
+      if (saved && !(Number(saved.currentPrice) > 0)) { toast('Inversión creada. El mercado no responde ahora: su precio se cargará solo en cuanto vuelva.'); return; }
       toast(investment ? 'Inversión actualizada' : isMarket() ? 'Inversión creada con su precio de mercado. Añade ahora tus compras.' : 'Inversión creada. Añade ahora sus operaciones.');
     },
     async onDanger(dialog) {
@@ -4203,7 +4213,10 @@ async function refreshPricesNow({ silent = false, ids = null } = {}) {
   const ok = (result.results || []).filter((r) => r.ok);
   const failed = (result.results || []).filter((r) => !r.ok);
   render();
-  if (!silent || failed.length) {
+  // En las consultas automáticas el aviso de fallo sale como mucho cada 30 minutos (la tarjeta ya lo indica).
+  const quietFail = silent && failed.length && Date.now() - (store.lastFailToast || 0) < 30 * 60 * 1000;
+  if (failed.length && !quietFail) store.lastFailToast = Date.now();
+  if ((!silent || failed.length) && !quietFail) {
     if (failed.length) {
       const names = failed.slice(0, 3).map((f) => f.name).join(', ') + (failed.length > 3 ? '…' : '');
       toast(`${ok.length} de ${ok.length + failed.length} actualizadas. Sin precio: ${names}. ${failed[0].error}`, ok.length ? 'success' : 'error');
@@ -4217,7 +4230,8 @@ async function maybeAutoRefreshPrices() {
   if (!s?.autoPrices || store.offline || document.hidden) return;
   if (!(store.data.investments || []).some(quotable)) return;
   const last = Date.parse(s.pricesRefreshedAt || '') || 0;
-  if (Date.now() - last < 15 * 60 * 1000) return;
+  const pending = (store.data.investments || []).some((i) => quotable(i) && !(Number(i.currentPrice) > 0));
+  if (Date.now() - last < (pending ? 60 * 1000 : 15 * 60 * 1000)) return;
   try { await refreshPricesNow({ silent: true }); } catch { /* sin conexión: se reintenta más tarde */ }
 }
 
