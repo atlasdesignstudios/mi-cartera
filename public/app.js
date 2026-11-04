@@ -4467,14 +4467,37 @@ function setupServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   const hadController = Boolean(navigator.serviceWorker.controller);
   let reloading = false;
+  let registration = null;
+  const checkForUpdate = () => {
+    if (document.hidden || !navigator.onLine || !registration) return;
+    registration.update().catch(() => {});
+  };
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController || reloading) return;
     reloading = true;
-    toast('Hay una versión nueva de Mi Cartera. Recargando…');
-    setTimeout(() => location.reload(), 900);
+    toast('Actualización instalada. Recargando Mi Cartera…');
+    // El navegador conserva localStorage/IndexedDB; no se borran datos ni sesiones.
+    setTimeout(() => location.reload(), 700);
   });
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
-    .then((reg) => { reg.update().catch(() => {}); })
+    .then((reg) => {
+      registration = reg;
+      checkForUpdate();
+      // Detecta publicaciones nuevas mientras la app permanece abierta.
+      setInterval(checkForUpdate, 60 * 1000);
+      document.addEventListener('visibilitychange', checkForUpdate);
+      window.addEventListener('online', checkForUpdate);
+      reg.addEventListener('updatefound', () => {
+        const worker = reg.installing;
+        if (!worker) return;
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            // El service worker nuevo ejecuta skipWaiting y controllerchange recarga la app.
+            checkForUpdate();
+          }
+        });
+      });
+    })
     .catch(() => {});
 }
 
