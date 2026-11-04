@@ -1260,17 +1260,17 @@ function investmentCompositionChart(holdings, totals) {
   const rows = [...holdings].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   const costTotal = Math.max(0, Number(totals.cost) || 0);
   const gainTotal = Number(totals.pnl) || 0;
-  const gainColor = gainTotal >= 0 ? '#55b88f' : '#e16f76';
   const width = 720, height = 230, left = 48, right = 18, top = 18, bottom = 42;
   const plotW = width - left - right, plotH = height - top - bottom;
   let runningCost = 0, runningGain = 0;
   const points = rows.map((h, i) => { runningCost += Number(h.cost) || 0; runningGain += Number(h.pnl) || 0; return { name: String(h.name || 'Inversión'), cost: runningCost, gain: runningGain, i }; });
-  const maxVal = Math.max(1, ...points.map(p => Math.max(p.cost, p.gain, 0)), costTotal, gainTotal, 0) * 1.08;
+  const maxVal = Math.max(1, ...points.map(p => Math.max(p.cost, p.gain, 0)), costTotal, 0) * 1.08;
+  const minVal = Math.min(0, ...points.map(p => p.gain)) * 1.08;
   const x = i => left + (points.length <= 1 ? plotW / 2 : i * plotW / (points.length - 1));
-  const y = v => top + plotH - (Math.max(0, v) / maxVal) * plotH;
+  const y = v => top + ((maxVal - v) / (maxVal - minVal || 1)) * plotH;
   const path = key => points.map((p, i) => `${i ? 'L' : 'M'} ${x(i).toFixed(1)} ${y(p[key]).toFixed(1)}`).join(' ');
   const area = key => points.length ? `${path(key)} L ${x(points.length - 1).toFixed(1)} ${y(0).toFixed(1)} L ${x(0).toFixed(1)} ${y(0).toFixed(1)} Z` : '';
-  const ticks = [0, .5, 1].map(t => `<line x1="${left}" x2="${width-right}" y1="${(top+plotH*(1-t)).toFixed(1)}" y2="${(top+plotH*(1-t)).toFixed(1)}" class="invest-chart-gridline"/><text x="${left-9}" y="${(top+plotH*(1-t)+4).toFixed(1)}" text-anchor="end" class="invest-chart-tick">${esc(money(maxVal*t))}</text>`).join('');
+  const ticks = [0, .5, 1].map(t => { const v = minVal + (maxVal - minVal) * t; return `<line x1="${left}" x2="${width-right}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="invest-chart-gridline"/><text x="${left-9}" y="${(y(v)+4).toFixed(1)}" text-anchor="end" class="invest-chart-tick">${esc(money(v))}</text>`; }).join("");
   const labels = points.map((p,i) => `<text x="${x(i).toFixed(1)}" y="${height-12}" text-anchor="middle" class="invest-chart-tick">${esc(p.name.length > 12 ? p.name.slice(0,11)+'…' : p.name)}</text>`).join('');
   const dots = key => points.map((p,i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="3.8" class="invest-chart-point ${key}"/><title>${esc(p.name)}: ${esc(money(p[key]))}</title>`).join('');
   return `<section class="card invest-chart-card" aria-label="Gráfica de aportaciones y beneficio acumulados">
