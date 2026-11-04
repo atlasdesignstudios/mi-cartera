@@ -18,7 +18,7 @@ const PORT = Number(process.env.PORT) || 4321;
 // Por defecto escucha en toda la red local para poder abrirla desde el móvil.
 // Con MC_HOST=127.0.0.1 se limita al propio ordenador.
 const LISTEN_HOST = process.env.MC_HOST || '0.0.0.0';
-const VERSION = '1.7.1';
+const VERSION = '1.7.2';
 let LISTEN_PORT = PORT;
 
 fs.mkdirSync(BACKUP_DIR, { recursive: true });

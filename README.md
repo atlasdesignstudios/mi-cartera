@@ -184,6 +184,11 @@ Los que antes había que resolver a mano ya los resuelve la app:
 - **Restaurar una copia**: **Ajustes → Datos → Copias automáticas → Restaurar**. Antes se guarda una copia de lo que tienes ahora, así que se puede deshacer.
 - **Cambiar de ordenador**: **Ajustes → Sincronización cifrada → Crear** en el antiguo y **Abrir → Reemplazar todo** en el nuevo (o copia la carpeta `data/`).
 
+## Novedades de la 1.7.2
+
+- **Tema oscuro más profundo y microinteracciones**: transiciones suaves en botones, tarjetas y listas, con respeto a «reducir movimiento» del sistema.
+- **Auditoría técnica**: pruebas automáticas (`npm test`) y comprobación de sintaxis antes de publicar la versión web, y límite de memoria para las sesiones y los intentos fallidos de PIN.
+
 ## Novedades de la 1.7.1
 
 - Si el servicio de cotizaciones no responde al crear una inversión, ya no se bloquea: se crea igualmente, se valora a lo que pagaste y el precio se carga solo (se reintenta cada minuto). El formulario muestra un botón «Reintentar».

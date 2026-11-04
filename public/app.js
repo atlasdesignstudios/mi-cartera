@@ -4,7 +4,7 @@ import * as F from './fiscal.js';
 import { GLYPHS, glyphSVG, normalizeGlyph } from './glyphs.js';
 
 const STORAGE_KEY = 'micartera.state.v1';
-const APP_VERSION = '1.7.1';
+const APP_VERSION = '1.7.2';
 // En la versión web (GitHub Pages) no hay servidor: los datos viven en este navegador.
 const WEB = Boolean(globalThis.MC_WEB);
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'MXN', 'ARS', 'COP', 'CLP', 'PEN', 'BRL', 'UYU', 'JPY'];
