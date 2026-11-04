@@ -1376,3 +1376,21 @@ button:disabled { cursor: not-allowed; }
 .invest-chart-area { opacity:.08; } .invest-chart-area.cost { fill:#e16f76; } .invest-chart-area.gain { fill:#55b88f; }
 .invest-chart-point { fill:var(--surface); stroke:#e16f76; stroke-width:2; } .invest-chart-point.gain { stroke:#55b88f; }
 .invest-chart-note { margin:0; color:var(--muted); font-size:12px; }
+
+/* Análisis inteligente del resumen: alertas explicables y accionables. */
+.financial-insights-card { gap: 16px; }
+.financial-insights-card .card-head { margin-bottom: 0; }
+.ai-mark { display:inline-flex; align-items:center; gap:6px; padding:6px 9px; border-radius:999px; background:var(--accent-soft); color:var(--accent-2); font-size:11px; font-weight:600; white-space:nowrap; }
+.financial-insights-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr)); gap:10px; }
+.financial-insight { display:flex; align-items:flex-start; gap:11px; min-width:0; padding:13px 14px; border:1px solid var(--border); border-radius:14px; background:var(--surface-2); }
+.financial-insight-icon { display:grid; place-items:center; flex:none; width:32px; height:32px; border-radius:10px; background:var(--surface-3); color:var(--muted); }
+.financial-insight.warning .financial-insight-icon { color:var(--danger); background:var(--danger-soft); }
+.financial-insight.caution .financial-insight-icon { color:var(--amber); background:color-mix(in srgb,var(--amber) 13%,transparent); }
+.financial-insight.positive .financial-insight-icon { color:var(--income); background:color-mix(in srgb,var(--income) 12%,transparent); }
+.financial-insight-body { min-width:0; }
+.financial-insight-body b { display:block; font-size:13px; font-weight:600; line-height:1.4; }
+.financial-insight-body p { margin:4px 0 7px; color:var(--muted); font-size:12.5px; line-height:1.5; }
+.financial-insight-body a { display:inline-flex; align-items:center; gap:4px; color:var(--accent-2); font-size:12px; font-weight:570; text-decoration:none; }
+.financial-insight-body a:hover { text-decoration:underline; text-underline-offset:3px; }
+.financial-insights-foot { margin:0; color:var(--muted-2); font-size:11px; }
+@media (max-width:560px) { .financial-insights-card .card-head { align-items:center; } .financial-insight { padding:12px; } }
