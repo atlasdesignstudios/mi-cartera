@@ -858,6 +858,25 @@ function financialInsights(month, budgets, upcomingNet, upcoming) {
   }
   const exceeded = budgets.filter((b) => b.remaining < 0).sort((a, b) => a.remaining - b.remaining);
   for (const b of exceeded.slice(0, 2)) items.push({ tone: 'warning', icon: 'alert', title: `Presupuesto de ${b.name} superado`, text: `Has sobrepasado el límite en ${money(Math.abs(b.remaining))}. Puedes ajustar el presupuesto o revisar sus gastos.`, href: '#/presupuestos', link: 'Ver presupuesto' });
+  const today = todayISO();
+  const day = Number(today.slice(8, 10)) || 1;
+  const byCategory = new Map();
+  for (const tx of monthExpenses) { if (tx.date <= today) byCategory.set(tx.categoryId, (byCategory.get(tx.categoryId) || 0) + (Number(tx.amount) || 0)); }
+  const unusual = [...byCategory.entries()].map(([id, current]) => {
+    const history = [1, 2, 3].map((offset) => {
+      const key = addMonths(month, -offset);
+      const date = parseISO(`${key}-01`);
+      const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+      const cutoff = `${key}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+      return round(sum(transactions.filter((tx) => tx.type === 'expense' && tx.categoryId === id && monthKey(tx.date) === key && tx.date <= cutoff), (tx) => Number(tx.amount) || 0));
+    });
+    const average = round(sum(history) / history.length);
+    return { id, current: round(current), average, name: categoryById(id)?.name || 'Otros' };
+  }).filter((x) => x.average >= 25 && x.current >= x.average * 1.3 && x.current - x.average >= 25).sort((a, b) => (b.current - b.average) - (a.current - a.average));
+  if (unusual.length) {
+    const x = unusual[0];
+    items.push({ tone: 'caution', icon: 'trend', title: `Más gasto de lo habitual en ${x.name}`, text: `Llevas ${money(x.current)} hasta hoy, frente a una media de ${money(x.average)} en los mismos días de los últimos tres meses.`, href: '#/movimientos', link: 'Revisar gastos' });
+  }
   const near = budgets.filter((b) => b.remaining >= 0 && b.pct >= 0.8).sort((a, b) => b.pct - a.pct);
   for (const b of near.slice(0, 2)) items.push({ tone: 'caution', icon: 'target', title: `Presupuesto de ${b.name} casi agotado`, text: `Ya has utilizado el ${percent(b.pct, 0)} y te quedan ${money(b.remaining)} este mes.`, href: '#/presupuestos', link: 'Controlar presupuesto' });
   if (upcoming.length && upcomingNet < 0) {
