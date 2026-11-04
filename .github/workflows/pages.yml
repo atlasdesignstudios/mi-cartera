@@ -29,6 +29,11 @@ jobs:
         run: |
           node --check server.js
           node --check public/app.js
+          node --check public/fiscal.js
+          node --check public/glyphs.js
+          node --check public/sw.js
+          node --check scripts/build-web.js
+          node --check tools/cloudflare-worker.js
           node --check dist/local-api.js
       - name: Subir artefacto de Pages
         if: github.event_name != 'pull_request'
@@ -41,6 +46,8 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     permissions:
+      contents: read
+      actions: read
       pages: write
       id-token: write
     environment:
