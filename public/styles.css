@@ -1405,3 +1405,19 @@ button:disabled { cursor: not-allowed; }
 .invest-chart-point.cost { stroke:#e16f76; }
 .invest-chart-point.value.positive { stroke:#55b88f; }
 .invest-chart-point.value.negative { stroke:#e16f76; }
+
+/* Aviso de actualización pendiente: instalación bajo control del usuario. */
+.update-prompt-backdrop { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; padding:20px; background:rgba(0,0,0,.68); backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px); }
+.update-prompt { width:min(100%,460px); padding:26px; border:1px solid var(--border); border-radius:22px; background:var(--surface); color:var(--text); box-shadow:0 24px 90px rgba(0,0,0,.35); animation:update-prompt-in .22s ease-out; }
+.update-prompt-mark { display:grid; place-items:center; width:42px; height:42px; border-radius:13px; background:var(--accent-soft); color:var(--accent-2); font-size:25px; }
+.update-prompt-eyebrow { margin:17px 0 5px; color:var(--accent-2); font-size:10px; font-weight:750; letter-spacing:.12em; }
+.update-prompt h2 { margin:0; font-size:21px; letter-spacing:-.025em; }
+.update-prompt-copy { margin:9px 0 10px; color:var(--muted); font-size:13px; }
+.update-prompt-notes { display:grid; gap:9px; margin:0; padding:0; list-style:none; }
+.update-prompt-notes li { position:relative; padding-left:19px; color:var(--text); font-size:13px; line-height:1.5; }
+.update-prompt-notes li::before { content:'✓'; position:absolute; left:0; color:var(--income); font-weight:750; }
+.update-prompt-foot { margin:16px 0 0; color:var(--muted); font-size:11px; line-height:1.5; }
+.update-prompt-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:9px; margin-top:21px; }
+.update-prompt-actions button { min-height:42px; }
+@keyframes update-prompt-in { from { opacity:0; transform:translateY(9px) scale(.985); } to { opacity:1; transform:translateY(0) scale(1); } }
+@media (max-width:480px) { .update-prompt { padding:21px; border-radius:19px; } .update-prompt-actions { display:grid; grid-template-columns:1fr 1fr; } .update-prompt-actions button { width:100%; } }
