@@ -79,7 +79,7 @@ Si el móvil no carga, haz doble clic en **`permitir-movil.bat`**: pide permiso 
 - Para una copia manual, cierra la app y copia la carpeta `data/`.
 - El navegador guarda además una copia de solo lectura para poder mostrar algo si el servidor no responde.
 
-La app no envía nada a Internet. No hay analítica, ni CDN, ni fuentes externas. La única excepción es opcional: si activas **Precios automáticos**, se consulta el símbolo de tus inversiones (nunca importes ni datos personales).
+La app no envía datos a ninguna nube propia ni usa analítica, CDN o fuentes externas. La función de **Precios automáticos** (activada por defecto) consulta el símbolo de tus inversiones y la fecha en Yahoo Finance, Coinbase, Finnhub (si has puesto tu clave) y el Banco Central Europeo; nunca envía importes ni datos personales. Puedes desactivar la actualización automática en **Ajustes → Cotizaciones**; las búsquedas y actualizaciones manuales puntuales seguirán consultando esas fuentes.
 
 ### Sincronización cifrada
 
@@ -108,7 +108,9 @@ La app no envía nada a Internet. No hay analítica, ni CDN, ni fuentes externas
 ## PIN y seguridad
 
 - Puedes activar un PIN de 4 a 8 dígitos en **Ajustes → Seguridad**. Se guarda con `scrypt` y sal aleatoria en `data/db.json`; la sesión se recuerda 30 días por dispositivo.
-- Está pensado para una **red doméstica de confianza**. No hay HTTPS: no expongas el puerto a Internet ni lo abras en el router.
+- Está pensado para una **red doméstica de confianza**. No hay HTTPS: no expongas el puerto a Internet ni lo abras en el router. Si solo lo vas a usar en el ordenador, arranca con `MC_HOST=127.0.0.1` (PowerShell: `$env:MC_HOST="127.0.0.1"; npm start`).
+- La API solo acepta peticiones cuyo `Host` y `Origin` coinciden con la máquina o su red local, y exige `Content-Type: application/json` en las peticiones con cuerpo. Eso bloquea el *DNS rebinding* y los envíos de formularios desde otras webs (CSRF).
+- Si entras por un nombre de host que no es el de la máquina ni una de sus IPs (por ejemplo, un dominio propio o Tailscale con DNS), añádelo a la variable de entorno `MC_ALLOWED_HOSTS` separado por comas.
 - Si olvidas el PIN: cierra la app, edita `data/db.json` y pon `"pinHash": null`, o restaura una copia anterior.
 
 ## Cómo se calcula
@@ -135,10 +137,11 @@ Están en `public/fiscal.js`, sin dependencias, y sirven para **estimación dire
 - **Modelo 130**: acumulado del 1 de enero al final del trimestre. Rendimiento = ingresos − gastos deducibles − gastos de difícil justificación (5 %, máximo 2.000 € al año). Se paga el 20 % menos los pagos de trimestres anteriores y las retenciones soportadas. Si el 70 % o más de tus ingresos del año anterior tuvo retención, no estás obligado a presentarlo.
 - **Plazos**: 1-20 de abril, julio y octubre, y 1-30 de enero para el 4T. Si domicilias el pago, el plazo acaba 5 días antes.
 - **Cuota de autónomos**: rendimiento computable = (ingresos − gastos deducibles) × 0,93 (7 % de gastos genéricos) / 12. Con él se busca el tramo de la tabla de 2026 y se aplica el 31,5 % a la base mínima. La tarifa plana es de 80 € al mes (88,64 € con el MEI) durante 12 meses, prorrogables otros 12 si los rendimientos no superan el SMI anual.
+- **Cuota estimada**: si no has apuntado el recibo de la Seguridad Social de un mes, la app lo estima con tu cuota mensual, pero solo para los meses de actividad (entre la fecha de alta y la de baja) y solo si ese mes no tiene ya un gasto de tipo `reta`. Así no se duplica la cuota ni se inventan meses anteriores al alta.
 
-Las tablas de cotización son las de la Orden PJC/297/2026, que mantiene en 2026 las cuotas de 2025. Para actualizarlas, cambia `RETA_TABLE` en `public/fiscal.js`.
+Las tablas de cotización son las de la Orden PJC/297/2026 (BOE-A-2026-7296), verificadas contra el texto oficial. Para actualizarlas, cambia `RETA_TABLE` en `public/fiscal.js`.
 
-> Mi Cartera aún **no es un sistema certificado Verifactu**. Hoy no es obligatorio para autónomos y Hacienda ha anunciado que lo retrasará; cuando lo sea, la app se adaptará.
+> **Verifactu (SIF) y factura electrónica B2B son obligaciones distintas.** El RD 1007/2023, modificado por el Real Decreto-ley 15/2025, fija el 1 de enero de 2027 para sociedades del Impuesto sobre Sociedades y el 1 de julio de 2027 para autónomos e IRPF. En octubre de 2026 Hacienda anunció su intención de ampliar el plazo, pero **mientras no se publique en el BOE sigue vigente el calendario anterior**. La factura electrónica B2B (RD 238/2026 y Orden HAC/1028/2026) será exigible el 6 de octubre de 2027 para grandes empresas y el 6 de octubre de 2028 para el resto. Mi Cartera **no es un sistema Verifactu certificado ni emite facturas electrónicas B2B**: solo cumple el contenido del Reglamento de facturación (RD 1619/2012) y conserva la numeración y la inmutabilidad de las facturas emitidas.
 
 ## Estructura
 

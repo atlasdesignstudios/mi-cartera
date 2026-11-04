@@ -6,7 +6,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { invoiceTotals, purchaseTotals, validateNif, IVA_RATES, TAX_MODES } from './public/fiscal.js';
+import { invoiceTotals, purchaseTotals, validateNif, IVA_RATES, TAX_MODES, isValidIsoDate, roundMoney, normalizeInvoiceLines, normalizePurchaseInput } from './public/fiscal.js';
 import { normalizeGlyph } from './public/glyphs.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +15,9 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const PORT = Number(process.env.PORT) || 4321;
+// Por defecto escucha en toda la red local para poder abrirla desde el móvil.
+// Con MC_HOST=127.0.0.1 se limita al propio ordenador.
+const LISTEN_HOST = process.env.MC_HOST || '0.0.0.0';
 const VERSION = '1.7.1';
 let LISTEN_PORT = PORT;
 
@@ -42,14 +45,14 @@ const PALETTE = ['#0e9f6e', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899
 
 const uid = () => crypto.randomUUID();
 const pad = (n) => String(n).padStart(2, '0');
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-const round8 = (n) => Math.round((Number(n) || 0) * 1e8) / 1e8;
-const round6 = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+const round2 = (n) => roundMoney(n, 2);
+const round8 = (n) => roundMoney(n, 8);
+const round6 = (n) => roundMoney(n, 6);
 const todayISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
-const validDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+const validDate = (s) => isValidIsoDate(s);
 const validColor = (c) => (typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c) ? c.toLowerCase() : null);
 const validLocale = (value, fallback = 'es-ES') => {
   const locale = clean(value, 20);
@@ -327,11 +330,13 @@ function sanitizeTransaction(obj, prev) {
     if (cat.kind !== type) throw bad('La categoría no corresponde al tipo de movimiento.');
     categoryId = cat.id;
   }
+  const date = obj.date === undefined || obj.date === '' ? todayISO() : obj.date;
+  if (!validDate(date)) throw bad('La fecha del movimiento no es válida (usa una fecha real en formato AAAA-MM-DD).');
   return {
     id: ensureId(obj, prev),
     type,
     amount,
-    date: validDate(obj.date) ? obj.date : todayISO(),
+    date,
     accountId: account.id,
     toAccountId,
     categoryId,
@@ -403,6 +408,8 @@ function sanitizeOp(obj, prev, candidateList) {
     if (!account) throw bad('La cuenta asociada no existe.');
     accountId = account.id;
   }
+  const date = obj.date === undefined || obj.date === '' ? todayISO() : obj.date;
+  if (!validDate(date)) throw bad('La fecha de la operación no es válida.');
   const op = {
     id: ensureId(obj, prev),
     investmentId: investment.id,
@@ -411,7 +418,7 @@ function sanitizeOp(obj, prev, candidateList) {
     units,
     price,
     fees,
-    date: validDate(obj.date) ? obj.date : todayISO(),
+    date,
     note: clean(obj.note, 300),
     ...opMarketFields(obj),
     createdAt: prev?.createdAt || new Date().toISOString()
@@ -463,9 +470,14 @@ function sanitizeRecurring(obj, prev) {
     categoryId = cat.id;
   }
   const frequency = FREQUENCIES.includes(obj.frequency) ? obj.frequency : 'monthly';
-  const startDate = validDate(obj.startDate) ? obj.startDate : prev?.startDate || todayISO();
-  const endDate = validDate(obj.endDate) ? obj.endDate : null;
+  const startDate = obj.startDate === undefined || obj.startDate === '' ? (prev?.startDate || todayISO()) : obj.startDate;
+  if (!validDate(startDate)) throw bad('La fecha de inicio no es válida.');
+  const endDate = obj.endDate === undefined || obj.endDate === null || obj.endDate === '' ? null : obj.endDate;
+  if (endDate && !validDate(endDate)) throw bad('La fecha de fin no es válida.');
   if (endDate && endDate < startDate) throw bad('La fecha de fin no puede ser anterior al inicio.');
+  if (obj.nextDate !== undefined && obj.nextDate !== '' && !validDate(obj.nextDate)) {
+    throw bad('La próxima fecha de la recurrencia no es válida.');
+  }
   const anchorDay = parseDate(startDate).getDate();
   let nextDate = startDate;
   if (prev) {
@@ -512,6 +524,8 @@ function sanitizeGoal(obj, prev) {
     if (!account) throw bad('La cuenta asociada no existe.');
     accountId = account.id;
   }
+  const deadline = obj.deadline === undefined || obj.deadline === null || obj.deadline === '' ? null : obj.deadline;
+  if (deadline && !validDate(deadline)) throw bad('La fecha límite del objetivo no es válida.');
   return {
     id: ensureId(obj, prev),
     name: clean(obj.name, 60) || 'Objetivo',
@@ -520,7 +534,7 @@ function sanitizeGoal(obj, prev) {
     target,
     saved: accountId ? 0 : Math.max(0, round2(obj.saved)),
     accountId,
-    deadline: validDate(obj.deadline) ? obj.deadline : null,
+    deadline,
     note: clean(obj.note, 300),
     done: Boolean(obj.done),
     createdAt: prev?.createdAt || new Date().toISOString()
@@ -598,6 +612,7 @@ function sanitizeBusiness(obj = {}, prev = {}) {
     activity: b.activity === 'empresarial' ? 'empresarial' : 'profesional',
     iae: clean(b.iae, 60),
     startDate: validDate(b.startDate) ? b.startDate : '',
+    endDate: validDate(b.endDate) && (!validDate(b.startDate) || b.endDate >= b.startDate) ? b.endDate : '',
     tarifaPlana: Boolean(b.tarifaPlana),
     societario: Boolean(b.societario),
     territory: TERRITORIES.includes(b.territory) ? b.territory : 'comun',
@@ -676,35 +691,48 @@ function sanitizeClient(obj, prev) {
     createdAt: prev?.createdAt || clean(obj.createdAt, 40) || new Date().toISOString()
   };
 }
-function sanitizeLines(list) {
-  const lines = (Array.isArray(list) ? list : []).slice(0, 100).map((l) => ({
-    desc: clean(l?.desc, 300),
-    qty: Math.round((Number(l?.qty) || 0) * 1000) / 1000,
-    price: round6(l?.price),
-    discount: Math.min(100, Math.max(0, round2(l?.discount))),
-    ivaRate: IVA_RATES.includes(Number(l?.ivaRate)) ? Number(l.ivaRate) : 21
-  })).filter((l) => l.desc || l.qty || l.price);
-  return lines;
+function sanitizeLines(list, kind = 'ordinaria', opts = {}) {
+  try { return normalizeInvoiceLines(list, kind, opts); }
+  catch (err) { throw bad(err.message); }
 }
 function sanitizeInvoice(obj, prev) {
   // Una factura emitida es inalterable: solo se pueden cambiar la nota interna y el vencimiento.
   if (prev && prev.status !== 'draft') {
-    return { ...prev, internalNote: clean(obj.internalNote, 300), dueDate: validDate(obj.dueDate) ? obj.dueDate : prev.dueDate };
+    const dueDate = obj.dueDate === undefined ? prev.dueDate : obj.dueDate;
+    if (dueDate && !validDate(dueDate)) throw bad('La fecha de vencimiento no es válida.');
+    if (dueDate && dueDate < prev.date) throw bad('El vencimiento no puede ser anterior a la fecha de la factura.');
+    return { ...prev, internalNote: clean(obj.internalNote, 300), dueDate };
   }
-  const lines = sanitizeLines(obj.lines);
-  const clientId = obj.clientId && db.clients.some((c) => c.id === obj.clientId) ? obj.clientId : null;
   const kind = obj.kind === 'rectificativa' ? 'rectificativa' : 'ordinaria';
+  const date = obj.date === undefined || obj.date === '' ? todayISO() : obj.date;
+  if (!validDate(date)) throw bad('La fecha de la factura no es válida (usa una fecha real en formato AAAA-MM-DD).');
+  const opDate = obj.opDate || '';
+  if (opDate && !validDate(opDate)) throw bad('La fecha de la operación no es válida.');
+  if (opDate && opDate > date) throw bad('La fecha de la operación no puede ser posterior a la de la factura.');
+  const dueDate = obj.dueDate || '';
+  if (dueDate && !validDate(dueDate)) throw bad('La fecha de vencimiento no es válida.');
+  if (dueDate && dueDate < date) throw bad('El vencimiento no puede ser anterior a la fecha de la factura.');
+  const lines = sanitizeLines(obj.lines, kind);
+  const clientId = obj.clientId && db.clients.some((c) => c.id === obj.clientId) ? obj.clientId : null;
   const series = clean(obj.series, 6).toUpperCase().replace(/[^A-Z0-9]/g, '')
     || (kind === 'rectificativa' ? db.settings.business.seriesR : db.settings.business.series) || 'F';
+  let rectifiesId = null;
+  if (kind === 'rectificativa') {
+    const orig = db.invoices.find((i) => i.id === obj.rectifiesId && i.status !== 'draft');
+    if (!orig) throw bad('Indica qué factura emitida rectificas.');
+    if (orig.id === (prev?.id || obj.id)) throw bad('Una factura no puede rectificarse a sí misma.');
+    if (orig.kind === 'rectificativa') throw bad('No se puede rectificar una factura rectificativa. Emite una factura ordinaria nueva.');
+    rectifiesId = orig.id;
+  }
   const item = {
     id: ensureId(obj, prev),
     kind,
     status: 'draft',
     series,
     number: null,
-    date: validDate(obj.date) ? obj.date : todayISO(),
-    opDate: validDate(obj.opDate) ? obj.opDate : '',
-    dueDate: validDate(obj.dueDate) ? obj.dueDate : '',
+    date,
+    opDate,
+    dueDate,
     clientId,
     lines,
     taxMode: TAX_MODES[obj.taxMode] ? obj.taxMode : 'normal',
@@ -712,7 +740,7 @@ function sanitizeInvoice(obj, prev) {
     recargo: Boolean(obj.recargo),
     note: clean(obj.note, 600),
     internalNote: clean(obj.internalNote, 300),
-    rectifiesId: kind === 'rectificativa' && db.invoices.some((i) => i.id === obj.rectifiesId) ? obj.rectifiesId : null,
+    rectifiesId,
     rectifyReason: clean(obj.rectifyReason, 300),
     createdAt: prev?.createdAt || clean(obj.createdAt, 40) || new Date().toISOString()
   };
@@ -733,11 +761,27 @@ function issueInvoice(inv) {
   if (!own.ok) throw bad(`Tu NIF no es válido: ${own.message}. Revísalo en Ajustes → Mi negocio.`);
   const client = db.clients.find((c) => c.id === inv.clientId);
   if (!client) throw bad('Elige un cliente para poder emitir la factura.');
+  if (!validDate(inv.date)) throw bad('La fecha de la factura no es válida.');
+  if (inv.date > todayISO()) throw bad('La fecha de la factura no puede ser futura.');
+  if (inv.opDate && inv.opDate > inv.date) throw bad('La fecha de la operación no puede ser posterior a la de la factura.');
+  if (inv.dueDate && inv.dueDate < inv.date) throw bad('El vencimiento no puede ser anterior a la fecha de la factura.');
   if (!inv.lines.length || !inv.lines.some((l) => l.desc)) throw bad('Añade al menos un concepto con descripción.');
+  const totals = invoiceTotals(inv);
+  if (inv.kind === 'ordinaria') {
+    if (inv.lines.some((l) => !(l.qty > 0))) throw bad('Todas las cantidades deben ser mayores que cero.');
+    if (inv.lines.some((l) => l.price < 0)) throw bad('El precio no puede ser negativo.');
+    if (!(totals.base > 0)) throw bad('El importe de la factura debe ser mayor que cero.');
+  } else {
+    if (!inv.rectifiesId) throw bad('Indica qué factura rectificas.');
+    const orig = db.invoices.find((i) => i.id === inv.rectifiesId);
+    if (!orig || orig.status === 'draft') throw bad('La factura que rectificas no está emitida.');
+    if (orig.kind === 'rectificativa') throw bad('No se puede rectificar una factura rectificativa. Emite una factura ordinaria nueva.');
+    const already = db.invoices.find((i) => i.id !== inv.id && i.rectifiesId === inv.rectifiesId && i.status !== 'draft');
+    if (already) throw bad(`Esa factura ya tiene la rectificativa ${already.number}.`);
+  }
   if ((client.kind !== 'particular' || inv.taxMode === 'intracom' || inv.taxMode === 'isp') && !client.nif) {
     throw bad('Este cliente necesita NIF en la factura. Añádelo en su ficha.');
   }
-  if (inv.kind === 'rectificativa' && !inv.rectifiesId) throw bad('Indica qué factura rectificas.');
   const year = inv.date.slice(0, 4);
   const same = db.invoices.filter((i) => i.id !== inv.id && i.number && i.series === inv.series && i.date.slice(0, 4) === year);
   const last = same.sort((a, b2) => (a.seq || 0) - (b2.seq || 0)).at(-1);
@@ -745,8 +789,12 @@ function issueInvoice(inv) {
     throw bad(`La numeración debe ser correlativa: la fecha no puede ser anterior a la de ${last.number} (${last.date.split('-').reverse().join('/')}).`);
   }
   const seq = (last?.seq || 0) + 1;
+  const number = `${inv.series}${year}-${String(seq).padStart(4, '0')}`;
+  if (db.invoices.some((i) => i.id !== inv.id && i.number === number)) {
+    throw bad(`Ya existe una factura con el número ${number}. Revisa la numeración de esa serie.`);
+  }
   inv.seq = seq;
-  inv.number = `${inv.series}${year}-${String(seq).padStart(4, '0')}`;
+  inv.number = number;
   inv.status = 'issued';
   inv.issuedAt = new Date().toISOString();
   if (!inv.dueDate) {
@@ -764,11 +812,15 @@ function issueInvoice(inv) {
 }
 function payInvoice(inv, body) {
   if (inv.status === 'draft') throw bad('Primero emite la factura.');
-  const account = db.accounts.find((a) => a.id === body.accountId) || db.accounts[0];
-  if (!account) throw bad('Crea una cuenta para registrar el cobro.');
+  const account = body.accountId
+    ? db.accounts.find((a) => a.id === body.accountId)
+    : db.accounts[0];
+  if (!account) throw bad(body.accountId ? 'La cuenta indicada no existe.' : 'Crea una cuenta para registrar el cobro.');
+  const date = body.date === undefined || body.date === '' ? todayISO() : body.date;
+  if (!validDate(date)) throw bad('La fecha del cobro no es válida.');
+  if (date > todayISO()) throw bad('La fecha del cobro no puede ser futura.');
   const cat = ensureCategory('Facturación', 'income', 'invoice', '#0e9f6e');
   const total = round2(inv.total ?? invoiceTotals(inv).total);
-  const date = validDate(body.date) ? body.date : todayISO();
   const existing = inv.transactionId && db.transactions.find((t) => t.id === inv.transactionId);
   if (existing) {
     Object.assign(existing, { amount: Math.abs(total), date, accountId: account.id, updatedAt: new Date().toISOString() });
@@ -795,6 +847,7 @@ function payInvoice(inv, body) {
   inv.updatedAt = new Date().toISOString();
 }
 function unpayInvoice(inv) {
+  if (inv.status !== 'paid') throw bad('Esta factura no está cobrada.');
   if (inv.transactionId) {
     db.transactions = db.transactions.filter((t) => t.id !== inv.transactionId);
     recordDeletion('transactions', inv.transactionId);
@@ -806,9 +859,17 @@ function unpayInvoice(inv) {
 }
 function rectifyInvoice(orig) {
   if (orig.status === 'draft') throw bad('Un borrador se puede editar directamente.');
+  if (orig.kind === 'rectificativa') throw bad('No se puede rectificar una factura rectificativa. Emite una factura ordinaria nueva.');
+  const already = db.invoices.find((i) => i.rectifiesId === orig.id && i.status !== 'draft');
+  if (already) throw bad(`Esta factura ya tiene la rectificativa ${already.number}.`);
+  if (!orig.lines.length) throw bad('La factura original no tiene líneas que rectificar.');
+  const lines = orig.lines
+    .filter((l) => Number(l.qty) !== 0)
+    .map((l) => ({ ...l, qty: -l.qty }));
+  if (!lines.length) throw bad('La factura original no tiene importes que rectificar.');
   const draft = sanitizeInvoice({
     kind: 'rectificativa', rectifiesId: orig.id, clientId: orig.clientId, date: todayISO(),
-    lines: orig.lines.map((l) => ({ ...l, qty: -l.qty })), taxMode: orig.taxMode, irpfRate: orig.irpfRate, recargo: orig.recargo,
+    lines, taxMode: orig.taxMode, irpfRate: orig.irpfRate, recargo: orig.recargo,
     rectifyReason: 'Anulación total de la factura ' + orig.number,
     note: `Factura rectificativa de ${orig.number} de fecha ${orig.date.split('-').reverse().join('/')} (art. 15 RD 1619/2012).`
   }, null);
@@ -816,30 +877,34 @@ function rectifyInvoice(orig) {
   db.invoices.push(draft);
   return draft;
 }
-function sanitizePurchase(obj, prev) {
+function sanitizePurchase(obj, prev, { strict = true } = {}) {
   const kind = PURCHASE_KINDS.includes(obj.kind) ? obj.kind : 'otros';
   const supplier = clean(obj.supplier, 120) || (kind === 'reta' ? 'Seguridad Social (RETA)' : '');
   if (!supplier) throw bad('Indica el proveedor.');
-  const base = round2(obj.base);
-  if (!(base > 0)) throw bad('La base imponible debe ser mayor que cero.');
+  let nums;
+  try { nums = normalizePurchaseInput(obj, { kind, strict }); } catch (err) { throw bad(err.message); }
+  if (!(nums.base > 0)) throw bad('La base imponible debe ser mayor que cero.');
   const nif = cleanNif(obj.supplierNif);
   if (nif && !validateNif(nif).ok) throw bad(`NIF del proveedor: ${validateNif(nif).message}.`);
-  const ivaRate = kind === 'reta' ? 0 : IVA_RATES.includes(Number(obj.ivaRate)) ? Number(obj.ivaRate) : 21;
-  const hasIva = obj.ivaAmount !== undefined && obj.ivaAmount !== null && obj.ivaAmount !== '';
+  let date = obj.date === undefined || obj.date === '' ? todayISO() : obj.date;
+  if (!validDate(date)) {
+    if (strict) throw bad('La fecha del gasto no es válida (usa una fecha real en formato AAAA-MM-DD).');
+    date = todayISO();
+  }
   const item = {
     id: ensureId(obj, prev),
-    date: validDate(obj.date) ? obj.date : todayISO(),
+    date,
     supplier,
     supplierNif: nif,
     number: clean(obj.number, 40),
     concept: clean(obj.concept, 200),
     kind,
-    base,
-    ivaRate,
-    ivaAmount: hasIva && kind !== 'reta' ? round2(obj.ivaAmount) : null,
-    deductiblePct: Math.min(100, Math.max(0, Math.round(Number(obj.deductiblePct ?? 100)))),
-    ivaNoDeducible: Boolean(obj.ivaNoDeducible),
-    irpfRate: Math.min(47, Math.max(0, Number(obj.irpfRate) || 0)),
+    base: nums.base,
+    ivaRate: nums.ivaRate,
+    ivaAmount: nums.ivaAmount,
+    deductiblePct: nums.deductiblePct,
+    ivaNoDeducible: nums.ivaNoDeducible,
+    irpfRate: nums.irpfRate,
     accountId: obj.accountId && db.accounts.some((a) => a.id === obj.accountId) ? obj.accountId : null,
     transactionId: prev?.transactionId || null,
     note: clean(obj.note, 300),
@@ -861,7 +926,7 @@ function linkPurchaseTx(p) {
     : ensureCategory('Gastos del negocio', 'expense', 'briefcase', '#64748b');
   const note = `${p.supplier}${p.number ? ' · ' + p.number : ''}${p.concept ? ' · ' + p.concept : ''}`.slice(0, 500);
   if (existing) {
-    Object.assign(existing, { amount: p.total, date: p.date, accountId: p.accountId, note, updatedAt: new Date().toISOString() });
+    Object.assign(existing, { amount: Math.abs(p.total), date: p.date, accountId: p.accountId, categoryId: cat.id, note, updatedAt: new Date().toISOString() });
   } else {
     const tx = {
       id: uid(), type: 'expense', amount: p.total, date: p.date, accountId: p.accountId, toAccountId: null, categoryId: cat.id,
@@ -1272,12 +1337,14 @@ function importState(input) {
   const clientIds = new Set(state.clients.map((c) => c.id));
   const txIds = new Set(state.transactions.map((t) => t.id));
   state.invoices = (Array.isArray(input.invoices) ? input.invoices : []).filter((i) => i && typeof i === 'object').map((i) => {
-    const lines = sanitizeLines(i.lines);
+    const kind = i.kind === 'rectificativa' ? 'rectificativa' : 'ordinaria';
+    let lines = [];
+    try { lines = normalizeInvoiceLines(i.lines, kind, { strict: false }); } catch { lines = []; }
     const status = ['draft', 'issued', 'paid'].includes(i.status) ? i.status : 'draft';
     const number = status === 'draft' ? null : text(i.number, 40) || null;
     return {
       id: keepId(i),
-      kind: i.kind === 'rectificativa' ? 'rectificativa' : 'ordinaria',
+      kind,
       status: number ? status : 'draft',
       series: text(i.series, 6, 'F').toUpperCase(),
       number,
@@ -1309,7 +1376,7 @@ function importState(input) {
       const saved = db;
       db = { ...db, accounts: state.accounts };
       let item;
-      try { item = sanitizePurchase({ ...p, id: undefined, supplierNif: validateNif(p?.supplierNif).ok ? p.supplierNif : '' }, null); } finally { db = saved; }
+      try { item = sanitizePurchase({ ...p, id: undefined, supplierNif: validateNif(p?.supplierNif).ok ? p.supplierNif : '' }, null, { strict: false }); } finally { db = saved; }
       item.id = keepId(p);
       item.transactionId = txIds.has(p.transactionId) ? p.transactionId : null;
       return item;
@@ -1404,10 +1471,17 @@ function sealPackage(passphrase, data) {
 }
 function openPackage(passphrase, pkg) {
   if (!pkg || pkg.app !== 'mi-cartera' || pkg.v !== 1) throw bad('El archivo no es un paquete de Mi Cartera.');
+  const raw = Buffer.from(String(pkg.data), 'base64');
+  const salt = Buffer.from(String(pkg.salt), 'base64');
+  const iv = Buffer.from(String(pkg.iv), 'base64');
+  // Limita el coste de PBKDF2 que puede imponer un archivo ajeno (evita bloqueos por CPU).
+  const iter = Math.max(10000, Math.min(1000000, Math.round(Number(pkg.iter) || SYNC_ITER)));
+  if (salt.length < 8 || salt.length > 64 || iv.length !== 12 || raw.length < 32) {
+    throw bad('El archivo no es un paquete de Mi Cartera.');
+  }
   try {
-    const raw = Buffer.from(String(pkg.data), 'base64');
-    const key = crypto.pbkdf2Sync(String(passphrase || ''), Buffer.from(String(pkg.salt), 'base64'), Number(pkg.iter) || SYNC_ITER, 32, 'sha256');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(String(pkg.iv), 'base64'));
+    const key = crypto.pbkdf2Sync(String(passphrase || ''), salt, iter, 32, 'sha256');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(raw.subarray(raw.length - 16));
     const text = Buffer.concat([decipher.update(raw.subarray(0, raw.length - 16)), decipher.final()]).toString('utf8');
     return JSON.parse(text);
@@ -1898,6 +1972,9 @@ function json(res, code, data, extraHeaders = {}) {
   res.writeHead(code, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    'Cross-Origin-Resource-Policy': 'same-origin',
     'Content-Length': Buffer.byteLength(body),
     ...extraHeaders
   });
@@ -1999,7 +2076,7 @@ async function handleApi(req, res, pathname) {
       version: VERSION,
       locked: !isAuthed(req),
       pinEnabled: Boolean(db.settings.pinHash),
-      dataDir: DATA_DIR,
+      lanExposed: Boolean(networkInfo().urls?.length),
       port: LISTEN_PORT
     });
   }
@@ -2344,11 +2421,73 @@ const server = http.createServer((req, res) => {
     json(res, status, { error: err instanceof HttpError ? err.message : 'Error interno del servidor.' });
   };
   if (pathname.startsWith('/api/')) {
+    try {
+      assertLocalRequest(req);
+      assertJsonBody(req);
+    } catch (err) {
+      return done(err);
+    }
     Promise.resolve(handleApi(req, res, pathname)).catch(done);
   } else {
     try { serveStatic(req, res, pathname); } catch (err) { done(err); }
   }
 });
+
+// ---------------------------------------------------------------- protección de red
+/** Nombre de host sin puerto ni corchetes (para Host y Origin). */
+function hostNameOf(value) {
+  const host = String(value || '').trim().toLowerCase();
+  if (!host) return '';
+  if (host.startsWith('[')) {
+    const end = host.indexOf(']');
+    return end > 0 ? host.slice(1, end).replace(/%[0-9a-z]+$/i, '') : host;
+  }
+  return host.replace(/%[0-9a-z]+$/i, '').replace(/:\d+$/, '');
+}
+let allowedHostsCache = { at: 0, set: new Set() };
+/** Direcciones por las que se puede abrir la app: localhost, IPs de la máquina y MC_ALLOWED_HOSTS. */
+function allowedHostNames() {
+  if (Date.now() - allowedHostsCache.at < 30000) return allowedHostsCache.set;
+  const set = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
+  const hostname = String(os.hostname() || '').toLowerCase();
+  if (hostname) { set.add(hostname); set.add(`${hostname}.local`); }
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const iface of list || []) {
+      if (iface?.address) set.add(String(iface.address).toLowerCase().replace(/%[0-9a-z]+$/i, ''));
+    }
+  }
+  for (const item of String(process.env.MC_ALLOWED_HOSTS || '').split(',')) {
+    const value = hostNameOf(item);
+    if (value) set.add(value);
+  }
+  allowedHostsCache = { at: Date.now(), set };
+  return set;
+}
+/** Bloquea DNS rebinding (Host ajeno) y peticiones de otras webs al servidor local (Origin ajeno). */
+function assertLocalRequest(req) {
+  const allowed = allowedHostNames();
+  const host = hostNameOf(req.headers.host);
+  if (host && !allowed.has(host)) {
+    throw new HttpError(403, 'Acceso bloqueado: abre Mi Cartera desde su dirección local.');
+  }
+  const origin = req.headers.origin;
+  if (origin) {
+    let parsed;
+    try { parsed = new URL(String(origin)); } catch { throw new HttpError(403, 'Origen no permitido.'); }
+    if (!allowed.has(hostNameOf(parsed.host))) throw new HttpError(403, 'Origen no permitido.');
+  }
+}
+/** Solo se aceptan cuerpos JSON: evita CSRF con formularios HTML o text/plain. */
+function assertJsonBody(req) {
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return;
+  const hasBody = Number(req.headers['content-length'] || 0) > 0 || Boolean(req.headers['transfer-encoding']);
+  if (!hasBody) return;
+  const type = String(req.headers['content-type'] || '').toLowerCase();
+  if (!type.startsWith('application/json')) {
+    throw new HttpError(415, 'Formato no admitido: envía la petición como application/json.');
+  }
+}
 
 function openBrowser(url) {
   if (process.argv.includes('--no-open')) return;
@@ -2387,7 +2526,7 @@ server.on('error', async (err) => {
   if (!PORT_FIXED && LISTEN_PORT < MAX_PORT) {
     console.log(`  El puerto ${LISTEN_PORT} lo usa otro programa. Probando con el ${LISTEN_PORT + 1}…`);
     LISTEN_PORT += 1;
-    server.listen(LISTEN_PORT, '0.0.0.0');
+    server.listen(LISTEN_PORT, LISTEN_HOST);
     return;
   }
   console.error(`\nEl puerto ${LISTEN_PORT} ya está en uso por otro programa. Ciérralo o elige otro: set PORT=4400 && node server.js\n`);
@@ -2413,7 +2552,7 @@ async function autoRefreshPrices() {
   } catch (err) { console.error('  No se pudieron actualizar las cotizaciones:', err.message); }
 }
 
-server.listen(LISTEN_PORT, '0.0.0.0', () => {
+server.listen(LISTEN_PORT, LISTEN_HOST, () => {
   const local = `http://localhost:${LISTEN_PORT}`;
   console.log('\n  Mi Cartera · finanzas personales 100% locales\n');
   console.log(`  Ordenador:  ${local}`);

@@ -24,7 +24,7 @@ const core = slice("const VERSION = ", '// -------------------------------------
 // Motor fiscal (public/fiscal.js) dentro de su propio ámbito para no chocar con los nombres del servidor.
 const fiscalSrc = fs.readFileSync(path.join(PUBLIC_DIR, 'fiscal.js'), 'utf8');
 const fiscalExports = [...fiscalSrc.matchAll(/^export (?:const|function) ([A-Za-z0-9_]+)/gm)].map((m) => m[1]);
-const fiscal = 'const { invoiceTotals, purchaseTotals, validateNif, IVA_RATES, TAX_MODES } = (function () {\n'
+const fiscal = 'const { invoiceTotals, purchaseTotals, validateNif, IVA_RATES, TAX_MODES, isValidIsoDate, roundMoney, normalizeInvoiceLines, normalizePurchaseInput } = (function () {\n'
   + fiscalSrc.replace(/^export /gm, '') + '\nreturn { ' + fiscalExports.join(', ') + ' };\n})();\n';
 // Iconos (public/glyphs.js): el servidor solo necesita normalizar las claves.
 const glyphSrc = fs.readFileSync(path.join(PUBLIC_DIR, 'glyphs.js'), 'utf8');

@@ -1888,6 +1888,7 @@ function viewAjustes() {
   const s = store.data.settings;
   const theme = s.theme || 'auto';
   const pin = Boolean(s.pinEnabled);
+  const lan = Boolean(store.session?.lanExposed);
   const dataDir = store.session?.dataDir || '';
   return `
   <div class="viewhead">
@@ -1919,7 +1920,7 @@ function viewAjustes() {
       <h2>Seguridad</h2>
       <p>Protege el acceso con un PIN de 4 a 8 dígitos.</p>
       <div class="setting-row">
-        <div><h3>PIN de acceso</h3><p>${pin ? 'Activado. Se pedirá al abrir la app o tras 30 días.' : (WEB ? 'Desactivado. Cualquiera con acceso a este navegador podría entrar.' : 'Desactivado. Cualquiera en tu red podría entrar.')}</p></div>
+        <div><h3>PIN de acceso</h3><p>${pin ? 'Activado. Se pedirá al abrir la app o tras 30 días.' : (WEB ? 'Desactivado. Cualquiera con acceso a este navegador podría entrar.' : lan ? 'Desactivado. La app se puede abrir desde tu red local sin PIN.' : 'Desactivado. Solo es accesible desde este ordenador.')}</p></div>
         <span class="badge ${pin ? 'badge--soft' : ''}">${pin ? 'Activado' : 'Desactivado'}</span>
       </div>
       <div class="setting-row">
@@ -4582,7 +4583,10 @@ function retaMonthlyNow() {
   const last = [...(store.data?.purchases || [])].filter((p) => p.kind === 'reta').sort((a, c) => c.date.localeCompare(a.date))[0];
   return last ? last.base : 0;
 }
-function taxOpts() { return { retaMonthly: retaMonthlyNow(), startDate: biz().startDate || '' }; }
+function taxOpts() {
+  const b = biz();
+  return { retaMonthly: retaMonthlyNow(), startDate: b.startDate || '', endDate: b.endDate || '' };
+}
 function quarterLabel(year, q) { return `${q}T ${year}`; }
 function deadlineText(year, q) {
   const d = F.quarterDeadline(year, q);
@@ -5375,8 +5379,9 @@ function viewImpuestos() {
     </section>
     <section class="card">
       <div class="card-head"><div><h2>Verifactu y factura electrónica</h2><p>Lo que viene en la facturación</p></div></div>
-      <p class="card-text">La ley antifraude obliga a que los programas de facturación sean sistemas Verifactu, con huella encadenada y un código QR en cada factura. Según el Real Decreto-ley 15/2025, sería obligatorio para autónomos a partir del 1 de julio de 2027, y Hacienda ha anunciado que lo retrasará hasta octubre de 2028 (pendiente de publicarse en el BOE).</p>
-      <p class="card-text">Mi Cartera numera de forma correlativa y no permite modificar ni borrar facturas emitidas, pero <b>todavía no es un sistema Verifactu certificado</b>. Antes de que sea obligatorio lo actualizaremos o te avisaremos.</p>
+      <p class="card-text"><b>Verifactu (sistemas de facturación).</b> El RD 1007/2023, modificado por el Real Decreto-ley 15/2025, exige que los programas de facturación generen registros con huella encadenada y un código QR. El plazo publicado es el <b>1 de enero de 2027</b> para sociedades del Impuesto sobre Sociedades y el <b>1 de julio de 2027</b> para autónomos e IRPF. En octubre de 2026 Hacienda anunció su intención de ampliar el plazo, pero mientras no se publique en el BOE sigue vigente el calendario anterior.</p>
+      <p class="card-text"><b>Factura electrónica B2B (SPFE).</b> Es una obligación distinta, regulada por el RD 238/2026 y la Orden HAC/1028/2026. Será exigible el <b>6 de octubre de 2027</b> para empresas con más de 8 millones de euros de volumen de operaciones y el <b>6 de octubre de 2028</b> para el resto, con fases posteriores para el reporte de estados y pagos. No sustituye a Verifactu: son dos obligaciones que se acumulan.</p>
+      <p class="card-text">Mi Cartera numera de forma correlativa y no permite modificar ni borrar facturas emitidas, pero <b>todavía no es un sistema Verifactu certificado ni emite facturas electrónicas B2B</b>. No afirmamos que cumpla ninguna de esas obligaciones.</p>
     </section>
   </div>
   <p class="tiny legal-note">Cálculos orientativos para estimación directa simplificada en territorio común. No sustituyen a un asesor fiscal ni a la presentación oficial en la sede de la Agencia Tributaria.</p>`;
@@ -5387,18 +5392,24 @@ function retaYearData() {
   const today = todayISO();
   const year = Number(today.slice(0, 4));
   const start = `${year}-01-01`;
+  const b = biz();
   const invs = (store.data.invoices || []).filter((i) => i.number && i.date >= start && i.date <= today);
   const ingresos = round(sum(invs, (i) => invTotals(i).base));
   const purchases = (store.data.purchases || []).filter((p) => p.date >= start && p.date <= today);
   let gastos = round(sum(purchases, (p) => F.purchaseTotals(p).gastoDeducible));
-  const hasReta = purchases.some((p) => p.kind === 'reta');
-  const month = Number(today.slice(5, 7));
-  const b = biz();
-  const fromMonth = b.startDate && b.startDate.slice(0, 4) === String(year) ? Number(b.startDate.slice(5, 7)) : 1;
-  const months = Math.max(1, month - fromMonth + 1);
-  if (!hasReta && retaMonthlyNow()) gastos = round(gastos + retaMonthlyNow() * months);
-  const factor = (13 - fromMonth) / months;
-  return { year, ingresos, gastos, months, annualIng: round(ingresos * factor), annualGas: round(gastos * factor) };
+  // Solo se estima la cuota de los meses sin recibo apuntado, entre el alta y la baja.
+  const plan = F.retaPlan({
+    year, todayIso: today, startDate: b.startDate || '', endDate: b.endDate || '',
+    purchases: store.data.purchases || [], monthly: retaMonthlyNow()
+  });
+  if (plan.autoAmount) gastos = round(gastos + plan.autoAmount);
+  const months = plan.months;
+  const factor = months > 0 ? plan.totalMonths / months : 1;
+  return {
+    year, ingresos, gastos, months,
+    retaAuto: plan.autoAmount, retaMissing: plan.missing.length,
+    annualIng: round(ingresos * factor), annualGas: round(gastos * factor)
+  };
 }
 function retaResultHTML(ing, gas) {
   const b = biz();
@@ -5438,7 +5449,7 @@ function viewCuota() {
     <div class="head-actions"><button class="btn btn-ghost" type="button" data-action="edit-business">${icon('settings', 16)} Mi cuota actual</button></div>
   </div>
   <section class="card">
-    <div class="card-head"><div><h2>Previsión del año</h2><p>Rellenado con tus facturas y gastos (${data.months} mes${data.months === 1 ? '' : 'es'}) proyectados a 12 meses. Ajústalo si lo prevés distinto.</p></div></div>
+    <div class="card-head"><div><h2>Previsión del año</h2><p>Rellenado con tus facturas y gastos (${data.months > 0 ? `${data.months} mes${data.months === 1 ? '' : 'es'}` : 'sin actividad registrada todavía'}) proyectados a los meses de actividad del año. Ajústalo si lo prevés distinto.</p></div></div>
     <div class="form-grid reta-inputs">
       <div class="field"><span>Ingresos previstos del año (sin IVA)</span><input type="number" min="0" step="100" inputmode="decimal" value="${esc(Math.round(ing))}" data-reta="ing"></div>
       <div class="field"><span>Gastos deducibles previstos (incluida la cuota)</span><input type="number" min="0" step="100" inputmode="decimal" value="${esc(Math.round(gas))}" data-reta="gas"></div>
@@ -5535,6 +5546,9 @@ function openBusinessModal() {
         <div class="field"><span>Actividad</span><select name="activity"><option value="profesional"${b.activity !== 'empresarial' ? ' selected' : ''}>Profesional</option><option value="empresarial"${b.activity === 'empresarial' ? ' selected' : ''}>Empresarial</option></select></div>
         <div class="field"><span>Epígrafe IAE <span class="hint">(opcional)</span></span><input name="iae" maxlength="20" value="${esc(b.iae || '')}"></div>
         <div class="field"><span>Fecha de alta</span><input name="startDate" type="date" value="${esc(b.startDate || '')}"></div>
+      </div>
+      <div class="form-grid form-grid--3">
+        <div class="field"><span>Fecha de baja <span class="hint">(si ya no ejerces)</span></span><input name="endDate" type="date" value="${esc(b.endDate || '')}"></div>
       </div>
       <div class="form-grid form-grid--3">
         <div class="field"><span>IVA habitual</span><select name="ivaRate">${F.IVA_RATES.map((r) => `<option value="${r}"${Number(b.ivaRate ?? 21) === r ? ' selected' : ''}>${r} %</option>`).join('')}</select></div>

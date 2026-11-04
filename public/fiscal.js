@@ -27,17 +27,160 @@ export const TAX_MODES = {
   export: { label: 'Cliente fuera de la UE', mention: 'Operación no sujeta al IVA español o exenta por exportación (arts. 21 y 69 de la Ley 37/1992).' }
 };
 
-const r2 = (n) => Math.round((Number(n) || 0) * 100 + Number.EPSILON * 100) / 100;
+/* ------------------------------------------------------------------ validación compartida */
+/** Fecha ISO real: rechaza 2026-02-31, 2026-13-01 o formatos raros. */
+export function isValidIsoDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  if (year < 1900 || year > 2200 || month < 1 || month > 12 || day < 1) return false;
+  return day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/** Número finito; evita que NaN o Infinity se cuelen en los cálculos. */
+export function finiteNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** Redondeo monetario simétrico (medio alejado de cero) y seguro ante NaN/Infinity/desbordes. */
+export function roundMoney(value, decimals = 2) {
+  const n = finiteNumber(value, 0);
+  const places = Number.isFinite(decimals) ? Math.max(0, Math.min(8, Math.trunc(decimals))) : 2;
+  const factor = 10 ** places;
+  const scaled = Math.abs(n) * factor;
+  if (!Number.isFinite(scaled)) return 0;
+  return (n < 0 ? -1 : 1) * Math.round(scaled + 1e-9) / factor;
+}
+
+const r2 = (n) => roundMoney(n, 2);
 export const round2 = r2;
+
+/**
+ * Valida y normaliza las líneas de una factura.
+ * En las ordinarias la cantidad debe ser > 0 y el precio >= 0; en las rectificativas
+ * se admiten importes negativos (art. 15 RD 1619/2012). Lanza Error con un mensaje legible.
+ * Con strict:false (importaciones) corrige en vez de rechazar para no perder datos antiguos.
+ */
+export function normalizeInvoiceLines(list, kind = 'ordinaria', { strict = true } = {}) {
+  const source = Array.isArray(list) ? list : [];
+  if (source.length > 100 && strict) throw new Error('Una factura no puede tener más de 100 líneas.');
+  const allowNegative = kind === 'rectificativa';
+  const out = [];
+  for (let i = 0; i < Math.min(source.length, 100); i += 1) {
+    const l = source[i] || {};
+    const n = i + 1;
+    const desc = String(l.desc ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 300);
+    const hasPrice = l.price !== undefined && l.price !== null && l.price !== '' && Number(l.price) !== 0;
+    if (!desc && !hasPrice) continue; // fila vacía
+    const qtyRaw = l.qty === undefined || l.qty === null || l.qty === '' ? 0 : finiteNumber(l.qty, NaN);
+    const priceRaw = l.price === undefined || l.price === null || l.price === '' ? 0 : finiteNumber(l.price, NaN);
+    if (!Number.isFinite(qtyRaw) || !Number.isFinite(priceRaw)) {
+      if (strict) throw new Error(`Línea ${n}: la cantidad y el precio deben ser números válidos.`);
+      if (!desc) continue;
+    }
+    let qty = Number.isFinite(qtyRaw) ? roundMoney(qtyRaw, 3) : 0;
+    let price = Number.isFinite(priceRaw) ? roundMoney(priceRaw, 6) : 0;
+    if (!allowNegative) {
+      if (qty <= 0) {
+        if (strict) throw new Error(`Línea ${n}: la cantidad debe ser mayor que cero.`);
+        qty = Math.max(0.001, Math.abs(qty) || 1);
+      }
+      if (price < 0) {
+        if (strict) throw new Error(`Línea ${n}: el precio no puede ser negativo.`);
+        price = Math.abs(price);
+      }
+    } else if (qty === 0) {
+      if (strict) throw new Error(`Línea ${n}: la cantidad no puede ser cero.`);
+      qty = -1;
+    }
+    if (Math.abs(qty) > 1e7 || Math.abs(price) > 1e9) {
+      if (strict) throw new Error(`Línea ${n}: el importe está fuera de rango.`);
+      qty = Math.sign(qty || 1) * Math.min(Math.abs(qty), 1e7);
+      price = Math.sign(price || 1) * Math.min(Math.abs(price), 1e9);
+    }
+    let discount = 0;
+    if (l.discount !== undefined && l.discount !== null && l.discount !== '') {
+      discount = finiteNumber(l.discount, NaN);
+      if (!Number.isFinite(discount) || discount < 0 || discount > 100) {
+        if (strict) throw new Error(`Línea ${n}: el descuento debe estar entre 0 y 100.`);
+        discount = Number.isFinite(discount) ? Math.min(100, Math.max(0, discount)) : 0;
+      }
+    }
+    let ivaRate = 21;
+    if (l.ivaRate !== undefined && l.ivaRate !== null && l.ivaRate !== '') {
+      const rate = finiteNumber(l.ivaRate, NaN);
+      if (!IVA_RATES.includes(rate)) {
+        if (strict) throw new Error(`Línea ${n}: el IVA debe ser 21, 10, 4 o 0 %.`);
+        ivaRate = 21;
+      } else ivaRate = rate;
+    }
+    out.push({ desc, qty, price, discount: roundMoney(discount, 2), ivaRate });
+  }
+  return out;
+}
+
+/**
+ * Valida los importes de una factura recibida (gasto).
+ * Con strict:false (importaciones) corrige los valores dudosos en vez de rechazar el gasto.
+ */
+export function normalizePurchaseInput(obj = {}, { kind = 'otros', strict = true } = {}) {
+  const rawBase = finiteNumber(obj.base, NaN);
+  if (!Number.isFinite(rawBase) || rawBase < 0 || rawBase > 100000000) {
+    if (strict) throw new Error('La base imponible no es un importe válido.');
+  }
+  const base = Number.isFinite(rawBase) ? roundMoney(Math.max(0, Math.min(100000000, rawBase))) : 0;
+  let ivaRate = kind === 'reta' ? 0 : 21;
+  if (kind !== 'reta' && obj.ivaRate !== undefined && obj.ivaRate !== null && obj.ivaRate !== '') {
+    const rate = finiteNumber(obj.ivaRate, NaN);
+    if (!IVA_RATES.includes(rate)) {
+      if (strict) throw new Error('El IVA debe ser 21, 10, 4 o 0 %.');
+      ivaRate = 21;
+    } else ivaRate = rate;
+  }
+  const hasIva = kind !== 'reta' && obj.ivaAmount !== undefined && obj.ivaAmount !== null && obj.ivaAmount !== '';
+  let ivaAmount = null;
+  if (hasIva) {
+    let amount = finiteNumber(obj.ivaAmount, NaN);
+    if (!Number.isFinite(amount) || amount < 0) {
+      if (strict) throw new Error('El IVA no puede ser negativo ni un valor no numérico.');
+      amount = 0;
+    }
+    if (amount > base) {
+      if (strict) throw new Error('El IVA no puede superar la base imponible: revisa los importes.');
+      amount = base;
+    }
+    ivaAmount = roundMoney(amount);
+  }
+  let deductiblePct = 100;
+  if (obj.deductiblePct !== undefined && obj.deductiblePct !== null && obj.deductiblePct !== '') {
+    let pct = finiteNumber(obj.deductiblePct, NaN);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      if (strict) throw new Error('El porcentaje deducible debe estar entre 0 y 100.');
+      pct = 0;
+    }
+    deductiblePct = Math.round(pct);
+  }
+  let irpfRate = 0;
+  if (obj.irpfRate !== undefined && obj.irpfRate !== null && obj.irpfRate !== '') {
+    let rate = finiteNumber(obj.irpfRate, NaN);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 47) {
+      if (strict) throw new Error('La retención de IRPF debe estar entre 0 y 47 %.');
+      rate = 0;
+    }
+    irpfRate = rate;
+  }
+  return { base, ivaRate, ivaAmount, deductiblePct, irpfRate, ivaNoDeducible: Boolean(obj.ivaNoDeducible) };
+}
 
 /** Totales de una factura: base por tipo, cuota de IVA, recargo, retención y total. */
 export function invoiceTotals(inv) {
   const mode = TAX_MODES[inv?.taxMode] ? inv.taxMode : 'normal';
   const lines = (Array.isArray(inv?.lines) ? inv.lines : []).map((l) => {
-    const qty = Number(l.qty) || 0;
-    const price = Number(l.price) || 0;
-    const discount = Math.min(100, Math.max(0, Number(l.discount) || 0));
-    const rate = mode === 'normal' && IVA_RATES.includes(Number(l.ivaRate)) ? Number(l.ivaRate) : 0;
+    const qty = finiteNumber(l?.qty, 0);
+    const price = finiteNumber(l?.price, 0);
+    const discount = Math.min(100, Math.max(0, finiteNumber(l?.discount, 0)));
+    const rate = mode === 'normal' && IVA_RATES.includes(finiteNumber(l?.ivaRate, NaN)) ? finiteNumber(l.ivaRate, 0) : 0;
     const base = r2(qty * price * (1 - discount / 100));
     return { ...l, qty, price, discount, ivaRate: rate, base };
   });
@@ -55,18 +198,22 @@ export function invoiceTotals(inv) {
   const base = r2(byRate.reduce((s, g) => s + g.base, 0));
   const iva = r2(byRate.reduce((s, g) => s + g.iva, 0));
   const re = r2(byRate.reduce((s, g) => s + g.re, 0));
-  const irpfRate = Math.max(0, Math.min(47, Number(inv?.irpfRate) || 0));
+  const irpfRate = Math.max(0, Math.min(47, finiteNumber(inv?.irpfRate, 0)));
   const irpf = r2(base * irpfRate / 100);
   return { lines, byRate, base, iva, re, irpfRate, irpf, total: r2(base + iva + re - irpf), mode };
 }
 
 /** IVA soportado de una factura recibida (gasto) y la parte deducible. */
 export function purchaseTotals(p) {
-  const base = r2(p?.base);
-  const rate = Number(p?.ivaRate) || 0;
-  const iva = p?.ivaAmount !== undefined && p?.ivaAmount !== null && p?.ivaAmount !== '' ? r2(p.ivaAmount) : r2(base * rate / 100);
-  const pct = Math.max(0, Math.min(100, p?.deductiblePct === undefined || p?.deductiblePct === null ? 100 : Number(p.deductiblePct)));
-  const irpf = r2(base * (Number(p?.irpfRate) || 0) / 100);
+  const base = r2(finiteNumber(p?.base, 0));
+  const rate = finiteNumber(p?.ivaRate, 0);
+  const iva = Math.max(0, p?.ivaAmount !== undefined && p?.ivaAmount !== null && p?.ivaAmount !== ''
+    ? r2(finiteNumber(p.ivaAmount, 0))
+    : r2(base * rate / 100));
+  const pct = Math.max(0, Math.min(100, p?.deductiblePct === undefined || p?.deductiblePct === null || p?.deductiblePct === ''
+    ? 100
+    : finiteNumber(p.deductiblePct, 0)));
+  const irpf = r2(base * finiteNumber(p?.irpfRate, 0) / 100);
   // ivaNoDeducible: el IVA no se recupera (p. ej. comidas) y pasa a ser más gasto en el IRPF.
   const ivaDeducible = p?.ivaNoDeducible ? 0 : r2(iva * pct / 100);
   return {
@@ -217,6 +364,61 @@ export function nextBaseChange(todayIso) {
   return { requestBy: w[1], effective: w[2] };
 }
 
+/* ------------------------------------------------------------------ meses de actividad (RETA) */
+/** Clave YYYY-MM de una fecha ISO, o '' si no es válida. */
+export function monthKeyOf(iso) {
+  return isValidIsoDate(iso) ? iso.slice(0, 7) : '';
+}
+/** Claves YYYY-MM entre dos fechas ISO, ambas incluidas. */
+export function monthKeysBetween(fromIso, toIso) {
+  if (!isValidIsoDate(fromIso) || !isValidIsoDate(toIso)) return [];
+  const from = fromIso.slice(0, 7);
+  const to = toIso.slice(0, 7);
+  if (from > to) return [];
+  const out = [];
+  let [year, month] = from.split('-').map(Number);
+  while (out.length < 600) {
+    const key = `${year}-${pad(month)}`;
+    if (key > to) break;
+    out.push(key);
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+  }
+  return out;
+}
+/**
+ * Plan de cuota RETA del año: meses de actividad (entre alta y baja), meses ya apuntados
+ * y cuota estimada de los meses que faltan. Solo cuenta gastos con kind === 'reta'.
+ * todayIso limita los meses considerados (para el resumen del año) o es el cierre del
+ * trimestre (para el modelo 130).
+ */
+export function retaPlan({ year, todayIso, startDate = '', endDate = '', purchases = [], monthly = 0 } = {}) {
+  const yearKey = String(year);
+  const first = `${yearKey}-01-01`;
+  const last = `${yearKey}-12-31`;
+  const from = isValidIsoDate(startDate) && startDate > first ? startDate : first;
+  const to = isValidIsoDate(endDate) && endDate < last ? endDate : last;
+  const activity = monthKeysBetween(from, to);
+  const limit = isValidIsoDate(todayIso) ? todayIso.slice(0, 7) : last.slice(0, 7);
+  const elapsed = activity.filter((key) => key <= limit);
+  const recorded = new Set();
+  for (const p of Array.isArray(purchases) ? purchases : []) {
+    if (p?.kind !== 'reta') continue;
+    const key = monthKeyOf(p.date);
+    if (key && key.slice(0, 4) === yearKey && key <= limit) recorded.add(key);
+  }
+  const missing = elapsed.filter((key) => !recorded.has(key));
+  const rate = Math.max(0, finiteNumber(monthly, 0));
+  return {
+    activity, elapsed, missing,
+    recorded: [...recorded].sort(),
+    months: elapsed.length,
+    totalMonths: activity.length,
+    monthly: rate,
+    autoAmount: r2(missing.length * rate)
+  };
+}
+
 /* ------------------------------------------------------------------ modelos 303 y 130 */
 const inRange = (iso, a, b) => iso >= a && iso <= b;
 const isIssued = (inv) => inv && inv.status !== 'draft' && inv.number;
@@ -283,13 +485,16 @@ export function modelo130(invoices, purchases, year, q, opts = {}) {
     if (p.kind === 'reta') retaApuntada = r2(retaApuntada + t.base);
   }
   let retaAuto = 0;
-  if (opts.retaMonthly > 0 && retaApuntada === 0) {
-    const from = opts.startDate && opts.startDate > start ? opts.startDate : start;
-    if (from <= end) {
-      const months = (Number(end.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + Number(end.slice(5, 7)) - Number(from.slice(5, 7)) + 1;
-      retaAuto = r2(Math.max(0, months) * opts.retaMonthly);
-    }
-  }
+  // Solo se estiman los meses sin cuota apuntada; si hay recibos, sus importes ya están en gastos.
+  const plan = retaPlan({
+    year,
+    todayIso: end,
+    startDate: opts.startDate || '',
+    endDate: opts.endDate || '',
+    purchases,
+    monthly: opts.retaMonthly || 0
+  });
+  retaAuto = plan.autoAmount;
   gastos = r2(gastos + retaAuto);
   const previo = r2(ingresos - gastos);
   const dificil = previo > 0 ? r2(Math.min(2000, previo * 0.05)) : 0;
@@ -305,7 +510,9 @@ export function modelo130(invoices, purchases, year, q, opts = {}) {
   const bruto = r2(cuota20 - anteriores - retenciones);
   return {
     year, q, start, end,
-    ingresos, gastos, retaAuto, previo, dificil, rendimiento, cuota20,
+    ingresos, gastos, retaAuto, retaApuntada,
+    retaMonths: plan.missing, retaRecorded: plan.recorded,
+    previo, dificil, rendimiento, cuota20,
     anteriores, retenciones, bruto,
     resultado: Math.max(0, bruto),
     pctRetencion: ingresos > 0 ? conRetencion / ingresos : 0,

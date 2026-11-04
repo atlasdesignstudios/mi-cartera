@@ -5,7 +5,8 @@
   "description": "Gestoría privada para autónomos y particulares en España: facturas con IVA e IRPF, modelos 303 y 130, cuota de autónomos y finanzas personales. 100% local.",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
