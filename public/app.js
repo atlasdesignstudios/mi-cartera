@@ -4554,38 +4554,76 @@ async function forceUpdate() {
   url.searchParams.set('v', Date.now().toString(36));
   location.replace(url.toString());
 }
+function showPendingUpdate(registration, worker) {
+  if (document.getElementById('updatePrompt')) return;
+  let release = {
+    title: 'Actualización de Mi Cartera',
+    notes: ['Detección de nuevas versiones en segundo plano más fiable.', 'Ahora puedes consultar las mejoras antes de instalar.', 'La aplicación solo se recargará cuando pulses «Actualizar ahora».', 'Tus datos guardados y tu sesión se conservan.']
+  };
+  fetch(new URL('update-info.json', registration.scope), { cache: 'no-store' })
+    .then((response) => response.ok ? response.json() : null)
+    .then((info) => {
+      if (info && Array.isArray(info.notes)) release = { title: String(info.title || release.title), notes: info.notes.map(String).slice(0, 8) };
+    })
+    .catch(() => {})
+    .finally(() => {
+      if (document.getElementById('updatePrompt')) return;
+      const overlay = document.createElement('div');
+      overlay.id = 'updatePrompt';
+      overlay.className = 'update-prompt-backdrop';
+      overlay.innerHTML = '<section class="update-prompt" role="dialog" aria-modal="true" aria-labelledby="updatePromptTitle"><div class="update-prompt-mark">↻</div><p class="update-prompt-eyebrow">NUEVA VERSIÓN DISPONIBLE</p><h2 id="updatePromptTitle"></h2><p class="update-prompt-copy">Hemos preparado mejoras para Mi Cartera:</p><ul class="update-prompt-notes"></ul><p class="update-prompt-foot">Puedes seguir ahora y actualizar cuando quieras. Tus datos guardados no se borran.</p><div class="update-prompt-actions"><button type="button" class="btn btn-ghost update-later">Más tarde</button><button type="button" class="btn btn-primary update-now">Actualizar ahora</button></div></section>';
+      overlay.querySelector('h2').textContent = release.title;
+      const list = overlay.querySelector('.update-prompt-notes');
+      release.notes.forEach((note) => { const li = document.createElement('li'); li.textContent = note; list.append(li); });
+      const close = () => overlay.remove();
+      overlay.querySelector('.update-later').addEventListener('click', close);
+      overlay.querySelector('.update-now').addEventListener('click', () => {
+        const button = overlay.querySelector('.update-now');
+        button.disabled = true;
+        button.textContent = 'Instalando…';
+        (registration.waiting || worker).postMessage({ type: 'SKIP_WAITING' });
+      });
+      document.body.append(overlay);
+      overlay.querySelector('.update-now').focus();
+    });
+}
 function setupServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   const hadController = Boolean(navigator.serviceWorker.controller);
   let reloading = false;
   let registration = null;
+  let promptedWorker = null;
   const checkForUpdate = () => {
     if (document.hidden || !navigator.onLine || !registration) return;
     registration.update().catch(() => {});
+  };
+  const promptIfWaiting = (worker) => {
+    if (!worker || worker === promptedWorker || !navigator.serviceWorker.controller) return;
+    promptedWorker = worker;
+    showPendingUpdate(registration, worker);
   };
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController || reloading) return;
     reloading = true;
     toast('Actualización instalada. Recargando Mi Cartera…');
-    // El navegador conserva localStorage/IndexedDB; no se borran datos ni sesiones.
+    // El navegador conserva localStorage e IndexedDB; no se borran datos ni sesiones.
     setTimeout(() => location.reload(), 700);
   });
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
     .then((reg) => {
       registration = reg;
       checkForUpdate();
-      // Detecta publicaciones nuevas mientras la app permanece abierta.
-      setInterval(checkForUpdate, 60 * 1000);
+      if (reg.waiting) promptIfWaiting(reg.waiting);
+      // Comprobaciones periódicas en segundo plano; también al recuperar foco o conexión.
+      setInterval(checkForUpdate, 3 * 60 * 1000);
       document.addEventListener('visibilitychange', checkForUpdate);
       window.addEventListener('online', checkForUpdate);
+      window.addEventListener('focus', checkForUpdate);
       reg.addEventListener('updatefound', () => {
         const worker = reg.installing;
         if (!worker) return;
         worker.addEventListener('statechange', () => {
-          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-            // El service worker nuevo ejecuta skipWaiting y controllerchange recarga la app.
-            checkForUpdate();
-          }
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) promptIfWaiting(worker);
         });
       });
     })
