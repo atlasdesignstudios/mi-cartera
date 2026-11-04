@@ -1240,3 +1240,107 @@ input.is-locked { background: var(--surface-2); color: var(--muted); cursor: not
 
 .holding-price .price-pending { color: var(--muted); font-weight: 560; }
 .mkt-picked-live:has([data-retry-quote]) { flex: 1 1 100%; flex-direction: column; align-items: flex-start; gap: 8px; }
+
+
+/* ---------------------------------------------------------------- 1.8 · pulido visual, interacción y negro profundo */
+:root[data-theme="dark"] {
+  --bg: #000000;
+  --surface: #09090b;
+  --surface-2: #111114;
+  --surface-3: #1a1a1e;
+  --fill: rgba(255, 255, 255, 0.065);
+  --fill-strong: rgba(255, 255, 255, 0.11);
+  --chrome: rgba(5, 5, 7, 0.88);
+  --border: rgba(255, 255, 255, 0.075);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --sep: rgba(255, 255, 255, 0.09);
+  --chart-2: #29292e;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28), 0 0 0 0.5px rgba(255, 255, 255, 0.035);
+  --shadow-md: 0 12px 32px -16px rgba(0, 0, 0, 0.72), 0 0 0 0.5px rgba(255, 255, 255, 0.055);
+  --shadow-lg: 0 32px 80px -28px rgba(0, 0, 0, 0.92), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+}
+:root[data-theme="dark"] .seg button.active {
+  background: #242428;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.055);
+}
+:root[data-theme="dark"] .local-chip,
+:root[data-theme="dark"] .deadline,
+:root[data-theme="dark"] .holding-market {
+  border: 1px solid rgba(255, 255, 255, 0.035);
+}
+
+/* Microinteracciones breves: elevación al pasar el ratón y respuesta al pulsar. */
+.card {
+  transition: transform 220ms var(--spring), box-shadow 220ms var(--spring), background-color 220ms ease;
+}
+.row-link,
+.deadline,
+.holding-market,
+.mkt-result {
+  transition: transform 180ms var(--spring), background-color 180ms ease, box-shadow 180ms ease;
+}
+.nav a,
+.bottomnav a,
+.card-link,
+.link-btn,
+.swatch span,
+.emoji-grid button {
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) and (pointer: fine) {
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+  .row-link:hover { transform: translateX(2px); }
+  .deadline:hover,
+  .holding-market:hover { transform: translateY(-1px); }
+  .mkt-result:hover { transform: translateX(3px); }
+  .nav a:hover { transform: translateX(2px); }
+  .btn:not(:disabled):hover { transform: translateY(-1px); }
+  .icon-btn:hover { transform: scale(1.06); }
+  .fab:hover { transform: translateY(-3px) scale(1.025); }
+}
+.row-link:active,
+.deadline:active,
+.holding-market:active,
+.mkt-result:active { transform: scale(0.99); }
+.nav a:active,
+.bottomnav a:active { transform: scale(0.96); }
+.btn:not(:disabled):active { transform: scale(0.965); }
+.icon-btn:active { transform: scale(0.88); }
+.fab:active { transform: scale(0.92); }
+.card-link:active,
+.link-btn:active { opacity: 0.68; }
+button:disabled { cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .card:hover,
+  .row-link:hover,
+  .deadline:hover,
+  .holding-market:hover,
+  .mkt-result:hover,
+  .nav a:hover,
+  .btn:not(:disabled):hover,
+  .icon-btn:hover,
+  .fab:hover,
+  .row-link:active,
+  .deadline:active,
+  .holding-market:active,
+  .mkt-result:active,
+  .nav a:active,
+  .bottomnav a:active,
+  .btn:not(:disabled):active,
+  .icon-btn:active,
+  .fab:active {
+    transform: none !important;
+  }
+}
