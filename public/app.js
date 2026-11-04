@@ -1319,27 +1319,30 @@ function investmentCompositionChart(holdings, totals) {
   const rows = [...holdings].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   const costTotal = Math.max(0, Number(totals.cost) || 0);
   const gainTotal = Number(totals.pnl) || 0;
-  const width = 720, height = 230, left = 48, right = 18, top = 18, bottom = 42;
+  const valueTotal = Number(totals.value) || 0;
+  const positive = gainTotal >= 0;
+  const width = 720, height = 230, left = 82, right = 18, top = 18, bottom = 42;
   const plotW = width - left - right, plotH = height - top - bottom;
-  let runningCost = 0, runningGain = 0;
-  const points = rows.map((h, i) => { runningCost += Number(h.cost) || 0; runningGain += Number(h.pnl) || 0; return { name: String(h.name || 'Inversión'), cost: runningCost, gain: runningGain, i }; });
-  const maxVal = Math.max(1, ...points.map(p => Math.max(p.cost, p.gain, 0)), costTotal, 0) * 1.08;
-  const minVal = Math.min(0, ...points.map(p => p.gain)) * 1.08;
+  let runningCost = 0, runningValue = 0;
+  const points = rows.map((h) => { runningCost += Number(h.cost) || 0; runningValue += Number(h.value) || 0; return { name: String(h.name || 'Inversión'), cost: runningCost, value: runningValue }; });
+  const allValues = points.flatMap(p => [p.cost, p.value]);
+  const maxVal = Math.max(1, ...allValues, costTotal, valueTotal) * 1.08;
+  const minVal = Math.min(0, ...allValues) * 1.08;
   const x = i => left + (points.length <= 1 ? plotW / 2 : i * plotW / (points.length - 1));
   const y = v => top + ((maxVal - v) / (maxVal - minVal || 1)) * plotH;
   const path = key => points.map((p, i) => `${i ? 'L' : 'M'} ${x(i).toFixed(1)} ${y(p[key]).toFixed(1)}`).join(' ');
-  const area = key => points.length ? `${path(key)} L ${x(points.length - 1).toFixed(1)} ${y(0).toFixed(1)} L ${x(0).toFixed(1)} ${y(0).toFixed(1)} Z` : '';
-  const ticks = [0, .5, 1].map(t => { const v = minVal + (maxVal - minVal) * t; return `<line x1="${left}" x2="${width-right}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="invest-chart-gridline"/><text x="${left-9}" y="${(y(v)+4).toFixed(1)}" text-anchor="end" class="invest-chart-tick">${esc(money(v))}</text>`; }).join("");
+  const band = points.length ? `${path('cost')} ${points.slice().reverse().map((p,i) => `L ${x(points.length - 1 - i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ')} Z` : '';
+  const ticks = [0, .5, 1].map(t => { const v = minVal + (maxVal - minVal) * t; return `<line x1="${left}" x2="${width-right}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="invest-chart-gridline"/><text x="${left-10}" y="${(y(v)+4).toFixed(1)}" text-anchor="end" class="invest-chart-tick">${esc(money(v))}</text>`; }).join('');
   const labels = points.map((p,i) => `<text x="${x(i).toFixed(1)}" y="${height-12}" text-anchor="middle" class="invest-chart-tick">${esc(p.name.length > 12 ? p.name.slice(0,11)+'…' : p.name)}</text>`).join('');
-  const dots = key => points.map((p,i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="3.8" class="invest-chart-point ${key}"/><title>${esc(p.name)}: ${esc(money(p[key]))}</title>`).join('');
-  return `<section class="card invest-chart-card" aria-label="Gráfica de aportaciones y beneficio acumulados">
-    <div class="card-head"><div><h2>Aportaciones y beneficio</h2><p>Capital aportado y resultado acumulado por inversión</p></div><span class="invest-chart-total">${esc(money(costTotal + gainTotal))}</span></div>
-    <div class="invest-chart-legend"><span><i class="invest-chart-dot contributed"></i>Aportado · ${esc(money(costTotal))}</span><span><i class="invest-chart-dot ${gainTotal >= 0 ? 'gain' : 'loss'}"></i>${gainTotal >= 0 ? 'Beneficio' : 'Pérdida'} · ${gainTotal > 0 ? '+' : ''}${esc(money(gainTotal))}</span></div>
-    <div class="invest-chart-scroll"><svg class="invest-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Evolución acumulada de aportaciones y beneficio por inversión">
+  const dots = key => points.map((p,i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="3.8" class="invest-chart-point ${key}" tabindex="0"><title>${esc(p.name)} · ${key === 'cost' ? 'Aportado' : 'Valor actual'}: ${esc(money(p[key]))}</title></circle>`).join('');
+  return `<section class="card invest-chart-card" aria-label="Comparación de capital aportado y valor actual de las inversiones">
+    <div class="card-head"><div><h2>Aportaciones y beneficio</h2><p>El valor de mercado queda por encima si ganas y por debajo si pierdes</p></div><span class="invest-chart-total">${esc(money(valueTotal))}</span></div>
+    <div class="invest-chart-legend"><span><i class="invest-chart-dot contributed"></i>Aportado · ${esc(money(costTotal))}</span><span><i class="invest-chart-dot ${positive ? 'gain' : 'loss'}"></i>${positive ? 'Beneficio' : 'Pérdida'} · ${gainTotal > 0 ? '+' : ''}${esc(money(gainTotal))}</span></div>
+    <div class="invest-chart-scroll"><svg class="invest-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Línea roja: capital aportado ${esc(money(costTotal))}. Línea ${positive ? 'verde' : 'roja'}: valor actual ${esc(money(valueTotal))}.">
       ${ticks}
-      ${points.length ? `<path d="${area('cost')}" class="invest-chart-area cost"/><path d="${area('gain')}" class="invest-chart-area gain"/><path d="${path('cost')}" class="invest-chart-line cost"/><path d="${path('gain')}" class="invest-chart-line gain ${gainTotal < 0 ? 'loss' : ''}"/>${dots('cost')}${dots('gain')}${labels}` : ''}
+      ${points.length ? `<path d="${band}" class="invest-chart-band ${positive ? 'positive' : 'negative'}"/><path d="${path('cost')}" class="invest-chart-line cost"/><path d="${path('value')}" class="invest-chart-line value ${positive ? 'positive' : 'negative'}"/>${dots('cost')}${dots('value')}${labels}` : ''}
     </svg></div>
-    <p class="invest-chart-note">Cada punto añade una inversión a la suma acumulada; los importes se calculan con los datos actuales.</p>
+    <p class="invest-chart-note">La línea roja muestra lo aportado; la otra muestra el valor actual de mercado. La distancia entre ambas representa tu beneficio o pérdida.</p>
   </section>`;
 }
 function viewInversiones() {
