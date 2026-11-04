@@ -609,12 +609,13 @@ function startPolling() {
   startPolling.timer = setInterval(async () => {
     if (document.hidden || !store.data) return;
     try {
-      const response = await fetch('api/state', { credentials: 'same-origin' });
+      const response = await fetch('api/revision', { credentials: 'same-origin' });
       if (response.status === 401) { showLock(); return; }
       if (!response.ok) return;
-      const data = await response.json();
-      if (data.rev !== store.data.rev || store.offline) {
-        setData(data);
+      const { rev } = await response.json();
+      // Solo descarga y procesa el estado completo cuando realmente ha cambiado.
+      if (rev !== store.data.rev || store.offline) {
+        await loadState();
         render();
       }
     } catch { /* sin conexión temporal */ }
