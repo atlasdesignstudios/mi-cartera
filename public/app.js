@@ -54,7 +54,7 @@ function tone(hex) {
 const NAV = [
   { id: 'resumen', label: 'Resumen', icon: 'home' },
   { id: 'movimientos', label: 'Movimientos', icon: 'list' },
-  { id: 'recurrentes', label: 'Recurrentes', icon: 'repeat' },
+  { id: 'recurrentes', label: 'Cobros y pagos', icon: 'repeat' },
   { id: 'presupuestos', label: 'Presupuestos', icon: 'target' },
   { id: 'objetivos', label: 'Objetivos', icon: 'flag' },
   { id: 'inversiones', label: 'Inversiones', icon: 'trend' },
@@ -1907,7 +1907,7 @@ function viewMas() {
   const items = [
     { id: 'cuentas', icon: 'wallet', title: 'Cuentas', text: `${store.data.accounts.length} cuentas · ${money(totalCash(), { decimals: 0 })}` },
     { id: 'presupuestos', icon: 'target', title: 'Presupuestos', text: budgets.length ? `${budgets.length} límites${over ? ` · ${over} excedidos` : ''}` : 'Sin límites definidos' },
-    { id: 'recurrentes', icon: 'repeat', title: 'Recurrentes', text: (store.data.recurring || []).length ? `${money(totals.expense, { decimals: 0 })} fijos al mes` : 'Automatiza nómina y recibos' },
+    { id: 'recurrentes', icon: 'repeat', title: 'Cobros y pagos', text: (store.data.recurring || []).length ? `${money(totals.expense, { decimals: 0 })} fijos al mes` : 'Automatiza nómina y recibos' },
     { id: 'objetivos', icon: 'flag', title: 'Objetivos', text: goals.length ? `${goals.length} objetivos · ${goals.filter((g) => g.reached).length} conseguidos` : 'Ahorra con propósito' },
     { id: 'prestamos', icon: 'bank', title: 'Préstamos', text: (store.data.loans || []).length ? `${(store.data.loans || []).length} · ${money(totalDebt(), { decimals: 0 })} pendientes` : 'Hipotecas y préstamos' },
     { id: 'inversiones', icon: 'trend', title: 'Inversiones', text: 'Consulta tu cartera y su evolución' },
