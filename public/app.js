@@ -942,11 +942,6 @@ function viewResumen() {
         ${hasBusiness() ? `<button class="btn btn-outline-light" type="button" data-action="new-invoice">${icon('invoice', 16)} Nueva factura</button>` : moduleOn('investments') ? `<a class="btn btn-outline-light" href="#/inversiones">Ver cartera ${icon('arrowRight', 16)}</a>` : ''}
       </div>
     </div>
-    <div class="hero-visual">
-      <div class="hero-caption"><span>Ahorro acumulado · 12 meses</span><b>${esc(money(spark.total, { decimals: 0 }))}</b></div>
-      ${spark.svg}
-      <div class="hero-foot">Actualizado a las ${esc(new Date().toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }))}</div>
-    </div>
   </section>
 
   ${firstStepsCard()}
