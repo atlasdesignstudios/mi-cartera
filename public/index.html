@@ -68,14 +68,15 @@
     <form class="lock-card" id="lockForm">
       <span class="brand-mark brand-mark--big" aria-hidden="true"><i></i><i></i><i></i></span>
       <h1>Mi Cartera</h1>
-      <p>Tus datos están protegidos con un PIN.</p>
+      <p>Introduce tu PIN para desbloquear la aplicación.</p>
+      <p class="form-error" style="display:block">Importante: el PIN no cifra los datos guardados en este navegador. No lo consideres una protección frente a alguien con acceso al dispositivo.</p>
       <label class="field">
         <span>PIN de acceso</span>
         <input id="pinInput" name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" placeholder="••••" required>
       </label>
       <p class="form-error" id="lockError" hidden></p>
       <button class="btn btn-primary btn-block" type="submit">Entrar</button>
-      <small>Este dispositivo recordará la sesión durante 30 días.</small>
+      <small>La sesión puede durar hasta 30 días. En el servidor local, al reiniciarlo tendrás que volver a entrar.</small>
     </form>
   </div>
 
