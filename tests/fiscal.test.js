@@ -5,7 +5,7 @@ import {
   normalizeInvoiceLines, normalizePurchaseInput,
   invoiceTotals, purchaseTotals, validateNif,
   monthKeyOf, monthKeysBetween, retaPlan,
-  modelo303, modelo130, quarterRange, quarterDeadline, upcomingDeadlines,
+  modelo303, modelo130, modelo130Exemption, quarterRange, quarterDeadline, upcomingDeadlines,
   retaTramo, retaComputable, RETA_TABLE, RETA_RATE
 } from '../public/fiscal.js';
 
@@ -218,7 +218,7 @@ test('modelo130: regresión de cuota RETA parcial (no suprime los meses que falt
   const r = modelo130(
     [invoice({ date: '2026-05-10', lines: [{ desc: 'Servicio', qty: 1, price: 5000, discount: 0, ivaRate: 21 }] })],
     [purchase({ kind: 'reta', date: '2026-04-05', base: 380, ivaRate: 0 }), purchase({ date: '2026-05-01', base: 1000 })],
-    2026, 2, { retaMonthly: 380, startDate: '2026-03-15' }
+    2026, 2, { retaMonthly: 380, startDate: '2026-03-15', regime: 'simplificada' }
   );
   assert.equal(r.retaAuto, 1140);
   assert.deepEqual(r.retaMonths, ['2026-03', '2026-05', '2026-06']);
@@ -241,14 +241,14 @@ test('modelo130 no duplica la cuota ya apuntada de todos los meses', () => {
 
 test('modelo130 arrastra los pagos anteriores y descuenta las retenciones', () => {
   const q1 = invoice({ id: 'q1', date: '2026-01-15', lines: [{ desc: 'X', qty: 1, price: 1000, discount: 0, ivaRate: 21 }] });
-  const first = modelo130([q1], [], 2026, 1, {});
+  const first = modelo130([q1], [], 2026, 1, { regime: 'simplificada' });
   assert.equal(first.dificil, 50);
   assert.equal(first.cuota20, 190);
   assert.equal(first.resultado, 190);
-  const second = modelo130([q1], [], 2026, 2, {});
+  const second = modelo130([q1], [], 2026, 2, { regime: 'simplificada' });
   assert.equal(second.anteriores, 190);
   assert.equal(second.resultado, 0);
-  const retenido = modelo130([invoice({ ...q1, irpfRate: 15 })], [], 2026, 1, {});
+  const retenido = modelo130([invoice({ ...q1, irpfRate: 15 })], [], 2026, 1, { regime: 'simplificada' });
   assert.equal(retenido.retenciones, 150);
   assert.equal(retenido.resultado, 40);
 });
@@ -305,4 +305,25 @@ test('upcomingDeadlines devuelve el siguiente plazo real', () => {
   assert.equal(next[0].year, 2026);
   assert.equal(next[0].q, 4);
   assert.equal(next[0].to, '2027-02-01');
+});
+
+
+test('modelo130 solo aplica difícil justificación en estimación directa simplificada y si no hay reducción incompatible', () => {
+  const inv = [invoice({ date: '2026-01-15' })];
+  assert.equal(modelo130(inv, [], 2026, 1, {}).dificil, 0);
+  assert.equal(modelo130(inv, [], 2026, 1, { regime: 'normal' }).dificil, 0);
+  assert.equal(modelo130(inv, [], 2026, 1, { regime: 'simplificada', uniqueClientReduction: true }).dificil, 0);
+  assert.equal(modelo130(inv, [], 2026, 1, { regime: 'simplificada' }).dificil, 50);
+  assert.equal(modelo130(inv, [], 2026, 1, { regime: 'simplificada', difficultRate: 0.10 }).dificil, 100);
+});
+
+test('modelo130Exemption solo exime actividad profesional con 70% retenido en período aplicable', () => {
+  const prior = [invoice({ date: '2025-03-01', irpfRate: 15 }), invoice({ id: 'b', date: '2025-04-01', irpfRate: 0 })];
+  assert.equal(modelo130Exemption(prior, 2026, { activity: 'profesional' }).exempt, false);
+  assert.equal(modelo130Exemption([invoice({ date: '2025-03-01', irpfRate: 15 })], 2026, { activity: 'profesional' }).exempt, true);
+  assert.equal(modelo130Exemption([invoice({ date: '2025-03-01', irpfRate: 15 })], 2026, { activity: 'empresarial' }).exempt, false);
+});
+
+test('quarterDeadline desplaza también festivos configurados', () => {
+  assert.equal(quarterDeadline(2026, 1, { holidays: ['2026-04-20'] }).to, '2026-04-21');
 });
