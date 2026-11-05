@@ -276,24 +276,26 @@ export function quarterRange(year, q) {
   const end = `${year}-${pad(endMonth)}-${pad(new Date(year, endMonth, 0).getDate())}`;
   return { start, end };
 }
-function nextBusinessDay(iso) {
-  const d = new Date(iso + 'T12:00:00');
-  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+function nextBusinessDay(iso, holidays = []) {
+  const blocked = new Set((Array.isArray(holidays) ? holidays : []).filter(isValidIsoDate));
+  const d = new Date(`${iso}T12:00:00`);
+  let guard = 0;
+  while ((d.getDay() === 0 || d.getDay() === 6 || blocked.has(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`)) && guard++ < 370) d.setDate(d.getDate() + 1);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 /** Plazos trimestrales del autónomo (303 y 130) del ejercicio indicado. */
-export function quarterDeadline(year, q) {
-  if (q === 4) return { from: `${year + 1}-01-01`, to: nextBusinessDay(`${year + 1}-01-30`) };
+export function quarterDeadline(year, q, { holidays = [] } = {}) {
+  if (q === 4) return { from: `${year + 1}-01-01`, to: nextBusinessDay(`${year + 1}-01-30`, holidays) };
   const month = q * 3 + 1;
-  return { from: `${year}-${pad(month)}-01`, to: nextBusinessDay(`${year}-${pad(month)}-20`) };
+  return { from: `${year}-${pad(month)}-01`, to: nextBusinessDay(`${year}-${pad(month)}-20`, holidays) };
 }
 /** Próximos plazos con Hacienda a partir de hoy. */
-export function upcomingDeadlines(todayIso, { count = 4, withRenta = true } = {}) {
+export function upcomingDeadlines(todayIso, { count = 4, withRenta = true, holidays = [] } = {}) {
   const y = Number(todayIso.slice(0, 4));
   const out = [];
   for (const year of [y - 1, y, y + 1]) {
     for (let q = 1; q <= 4; q++) {
-      const d = quarterDeadline(year, q);
+      const d = quarterDeadline(year, q, { holidays });
       out.push({
         kind: 'quarter', year, q, from: d.from, to: d.to,
         title: `${q}T ${year}: IVA (303) e IRPF (130)`,
@@ -307,6 +309,22 @@ export function upcomingDeadlines(todayIso, { count = 4, withRenta = true } = {}
     }
   }
   return out.filter((d) => d.to >= todayIso).sort((a, b) => a.to.localeCompare(b.to)).slice(0, count);
+}
+
+/** Exención del pago fraccionado para actividades profesionales (art. 109 RIRPF).
+ * Año normal: usa el año natural anterior; si la actividad comenzó en el año actual,
+ * usa el porcentaje del período trimestral. No extiende la exención a actividad empresarial.
+ */
+export function modelo130Exemption(invoices, year, { activity = 'empresarial', startDate = '' } = {}) {
+  if (activity !== 'profesional') return { exempt: false, ratio: 0, basis: 'actividad no profesional' };
+  const startedThisYear = isValidIsoDate(startDate) && startDate >= `${year}-01-01`;
+  const from = startedThisYear ? `${year}-01-01` : `${year - 1}-01-01`;
+  const to = startedThisYear ? `${year}-12-31` : `${year - 1}-12-31`;
+  const issued = (invoices || []).filter((i) => isIssued(i) && inRange(i.date, from, to));
+  const income = issued.reduce((sum, inv) => sum + invoiceTotals(inv).base, 0);
+  const withheld = issued.reduce((sum, inv) => { const t = invoiceTotals(inv); return sum + (t.irpf > 0 ? t.base : 0); }, 0);
+  const ratio = income > 0 ? withheld / income : 0;
+  return { exempt: income > 0 && ratio >= 0.7, ratio, basis: startedThisYear ? 'año de inicio' : 'año anterior' };
 }
 
 /* ------------------------------------------------------------------ cuota de autónomos 2026 */
@@ -497,7 +515,9 @@ export function modelo130(invoices, purchases, year, q, opts = {}) {
   retaAuto = plan.autoAmount;
   gastos = r2(gastos + retaAuto);
   const previo = r2(ingresos - gastos);
-  const dificil = previo > 0 ? r2(Math.min(2000, previo * 0.05)) : 0;
+  const eligibleDifficultExpense = opts.regime === 'simplificada' && !opts.uniqueClientReduction;
+  const difficultRate = Number.isFinite(Number(opts.difficultRate)) ? Math.max(0, Math.min(0.1, Number(opts.difficultRate))) : 0.05;
+  const dificil = eligibleDifficultExpense && previo > 0 ? r2(Math.min(2000, previo * difficultRate)) : 0;
   const rendimiento = r2(previo - dificil);
   const cuota20 = rendimiento > 0 ? r2(rendimiento * 0.2) : 0;
   let anteriores = 0;
