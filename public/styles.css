@@ -1494,3 +1494,10 @@ button:disabled { cursor: not-allowed; }
   .viewhead h1 { font-size: 26px; }
   .hero { border-radius: 20px; }
 }
+
+/* Resumen principal: una sola idea visual y menos información simultánea. */
+.hero { grid-template-columns: minmax(0, 1fr); }
+.hero-visual { display: none; }
+@media (max-width: 980px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+}
