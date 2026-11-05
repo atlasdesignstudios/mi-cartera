@@ -918,22 +918,17 @@ function viewResumen() {
   const cash = totalCash();
   const debt = totalDebt();
   const worth = round(cash + portfolio.value - debt);
-  const spend = spendingByCategory(now);
-  const spendTotal = sum(spend, (s) => s.value);
   const recent = recentTransactions(5);
   const budgets = budgetProgress(now).filter((b) => b.budget > 0).slice(0, 4);
-  const spark = savingsSpark();
-  const series = monthlySeries(6);
   const upcoming = upcomingOccurrences(30);
   const upcomingNet = round(sum(upcoming, (u) => (u.rule.type === 'income' ? u.rule.amount : u.rule.type === 'expense' ? -u.rule.amount : 0)));
   const goals = (store.data.goals || []).map(goalProgress).sort((a, b) => a.reached - b.reached);
-  const insights = financialInsights(now, budgetProgress(now).filter((b) => b.budget > 0), upcomingNet, upcoming);
 
   return `
   ${store.offline ? `<div class="banner">${icon('alert', 17)}<span><b>Sin conexión.</b> Estás viendo la última copia guardada en este dispositivo.</span></div>` : ''}
   <section class="hero">
     <div class="hero-content">
-      <div class="hero-label">Patrimonio neto <span>a ${esc(longToday())}</span></div>
+      <div class="hero-label">Tu patrimonio <span>lo que tienes menos tus deudas</span></div>
       <div class="hero-value">${bigMoney(worth)}</div>
       ${compositionBar(cash, portfolio.value)}
       <div class="hero-meta">
@@ -955,29 +950,11 @@ function viewResumen() {
 
   ${firstStepsCard()}
   ${businessSummaryHTML()}
-  ${financialInsightsCard(insights)}
 
   <div class="statgrid">
     ${statCard('Ingresos del mes', bigMoney(stats.income), `${deltaBadge(stats.income, prev.income)} <span>vs. mes anterior</span>`, 'income', 'arrowUp')}
     ${statCard('Gastos del mes', bigMoney(stats.expense), `${deltaBadge(stats.expense, prev.expense, true)} <span>vs. mes anterior</span>`, 'expense', 'wallet')}
     ${statCard('Ahorro del mes', bigMoney(stats.net), `<span>${esc(percent(stats.rate))} de tus ingresos</span>`, 'net', 'sparkles')}
-  </div>
-
-  <div class="grid-2">
-    <section class="card">
-      <div class="card-head">
-        <div><h2>Flujo mensual</h2><p>Ingresos y gastos de los últimos 6 meses</p></div>
-        <div class="legend"><span><i style="background:var(--accent)"></i>Ingresos</span><span><i style="background:var(--chart-2)"></i>Gastos</span></div>
-      </div>
-      ${barChart(series)}
-    </section>
-    <section class="card">
-      <div class="card-head">
-        <div><h2>Gastos por categoría</h2><p>${esc(monthLabel(now))}</p></div>
-        <a class="card-link" href="#/movimientos">Ver todo ${icon('arrowRight', 14)}</a>
-      </div>
-      ${spendTotal > 0 ? donutChart(spend, spendTotal) : `<div class="empty"><span class="empty-icon">${icon('pie', 24)}</span><h3>Sin gastos este mes</h3><p>Cuando registres gastos verás aquí el reparto por categorías.</p></div>`}
-    </section>
   </div>
 
   ${pairCards([
