@@ -256,7 +256,7 @@ test('modelo130 arrastra los pagos anteriores y descuenta las retenciones', () =
 test('modelo130 limita el gasto de difícil justificación a 2.000 €', () => {
   const r = modelo130(
     [invoice({ date: '2026-02-10', lines: [{ desc: 'X', qty: 1, price: 100000, discount: 0, ivaRate: 21 }] })],
-    [], 2026, 1, {}
+    [], 2026, 1, { regime: 'simplificada' }
   );
   assert.equal(r.dificil, 2000);
   assert.equal(r.cuota20, round2((98000) * 0.2));
