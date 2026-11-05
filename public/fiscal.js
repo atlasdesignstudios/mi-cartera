@@ -315,11 +315,12 @@ export function upcomingDeadlines(todayIso, { count = 4, withRenta = true, holid
  * Año normal: usa el año natural anterior; si la actividad comenzó en el año actual,
  * usa el porcentaje del período trimestral. No extiende la exención a actividad empresarial.
  */
-export function modelo130Exemption(invoices, year, { activity = 'empresarial', startDate = '' } = {}) {
+export function modelo130Exemption(invoices, year, q = 1, { activity = 'empresarial', startDate = '' } = {}) {
   if (activity !== 'profesional') return { exempt: false, ratio: 0, basis: 'actividad no profesional' };
   const startedThisYear = isValidIsoDate(startDate) && startDate >= `${year}-01-01`;
-  const from = startedThisYear ? `${year}-01-01` : `${year - 1}-01-01`;
-  const to = startedThisYear ? `${year}-12-31` : `${year - 1}-12-31`;
+  const currentPeriod = quarterRange(year, q);
+  const from = startedThisYear ? currentPeriod.start : `${year - 1}-01-01`;
+  const to = startedThisYear ? currentPeriod.end : `${year - 1}-12-31`;
   const issued = (invoices || []).filter((i) => isIssued(i) && inRange(i.date, from, to));
   const income = issued.reduce((sum, inv) => sum + invoiceTotals(inv).base, 0);
   const withheld = issued.reduce((sum, inv) => { const t = invoiceTotals(inv); return sum + (t.irpf > 0 ? t.base : 0); }, 0);
