@@ -1925,7 +1925,10 @@ function viewMas() {
     { id: 'cuota', icon: 'shield', title: 'Cuota de autónomos', text: 'Tramo, tarifa plana y regularización' }
   );
   const bottom = bottomNavItems();
-  const visible = items.filter((it) => viewEnabled(it.id) && !bottom.includes(it.id));
+  // En escritorio, «Más» contiene todo salvo los accesos ya visibles en la barra lateral.
+  // En móvil, conserva la distribución de la barra inferior.
+  const primary = window.matchMedia('(min-width: 981px)').matches ? ['resumen', 'movimientos', 'cuentas'] : bottom;
+  const visible = items.filter((it) => viewEnabled(it.id) && !primary.includes(it.id));
   return `
   <div class="viewhead"><div><h1>Más</h1><p>Todas las secciones de Mi Cartera.</p></div></div>
   <div class="more-grid">${visible.map((it) => `<a class="card more-item" href="#/${it.id}">
