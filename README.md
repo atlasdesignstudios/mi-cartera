@@ -56,6 +56,7 @@ Puedes abrirla como página web en **https://atlasdesignstudios.github.io/mi-car
 
 - No necesita servidor: la misma lógica de `server.js` se ejecuta dentro del navegador y los datos se guardan en su `localStorage`. **No se envían a ningún sitio**, ni siquiera a GitHub.
 - Cada navegador y dispositivo tiene sus propios datos. La primera visita abre el asistente de inicio, donde eliges empezar vacío o con datos de ejemplo.
+- El PIN de la versión web solo bloquea la interfaz: **no cifra** los datos de `localStorage`. Cualquier persona con acceso al perfil del navegador o a sus herramientas de desarrollo puede acceder a ellos. Protege el dispositivo con la seguridad del sistema operativo y exporta copias periódicas. La versión web todavía no tiene cuentas ni sincronización cloud.
 - Si borras los datos del navegador, se pierden: usa **Exportar** a menudo. Las copias son compatibles con la versión local (puedes pasar datos de una a otra con Exportar/Importar).
 - Se publica sola con cada `push` a `main` (`.github/workflows/pages.yml`). Para generarla a mano: `node scripts/build-web.js` (crea `dist/`).
 
