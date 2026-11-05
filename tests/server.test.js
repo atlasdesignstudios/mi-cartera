@@ -124,7 +124,7 @@ test('bloquea Host y Origin ajenos y los cuerpos que no son JSON', async () => {
   assert.equal(foreignPort.status, 403);
 
   const sameOrigin = await request({
-    path: '/api/ping', headers: { Origin: `http://localhost:${port}` }
+    path: '/api/ping', headers: { Origin: `http://127.0.0.1:${port}` }
   });
   assert.equal(sameOrigin.status, 200);
 
