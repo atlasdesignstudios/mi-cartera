@@ -5694,7 +5694,19 @@ function openBusinessModal() {
         <div class="field"><span>Fecha de baja <span class="hint">(si ya no ejerces)</span></span><input name="endDate" type="date" value="${esc(b.endDate || '')}"></div>
       </div>
       <div class="form-grid form-grid--3">
-        <div class="field"><span>IVA habitual</span><select name="ivaRate">${F.IVA_RATES.map((r) => `<option value="${r}"${Number(b.ivaRate ?? 21) === r ? ' selected' : ''}>${r} %</option>`).join('')}</select></div>
+        <div class="field"><span>Régimen de IRPF para esta actividad</span><select name="taxRegime">
+           <option value="desconocido"${(b.taxRegime || 'desconocido') === 'desconocido' ? ' selected' : ''}>No lo sé / revisar</option>
+           <option value="simplificada"${b.taxRegime === 'simplificada' ? ' selected' : ''}>Estimación directa simplificada</option>
+           <option value="normal"${b.taxRegime === 'normal' ? ' selected' : ''}>Estimación directa normal</option>
+           <option value="objetiva"${b.taxRegime === 'objetiva' ? ' selected' : ''}>Estimación objetiva (módulos)</option>
+           <option value="atribucion"${b.taxRegime === 'atribucion' ? ' selected' : ''}>Entidad en atribución de rentas</option>
+         </select></div>
+         <div class="field"><span>Territorio fiscal para IRPF</span><select name="taxTerritory">
+           <option value="comun"${(b.taxTerritory || 'comun') === 'comun' ? ' selected' : ''}>Régimen común</option>
+           <option value="ceuta"${b.taxTerritory === 'ceuta' ? ' selected' : ''}>Ceuta</option>
+           <option value="melilla"${b.taxTerritory === 'melilla' ? ' selected' : ''}>Melilla</option>
+         </select></div>
+         <div class="field"><span>IVA habitual</span><select name="ivaRate">${F.IVA_RATES.map((r) => `<option value="${r}"${Number(b.ivaRate ?? 21) === r ? ' selected' : ''}>${r} %</option>`).join('')}</select></div>
         <div class="field"><span>Tu retención</span><select name="irpfRate">${F.IRPF_OPTIONS.map((o) => `<option value="${o.value}"${Number(b.irpfRate ?? 15) === o.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></div>
         <div class="field"><span>Días para cobrar</span><input name="paymentDays" type="number" min="0" max="120" value="${esc(b.paymentDays ?? 30)}"></div>
       </div>
