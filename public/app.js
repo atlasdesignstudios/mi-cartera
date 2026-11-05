@@ -569,7 +569,7 @@ function showBootError(message) {
   boot.hidden = false;
   boot.classList.add('error');
   boot.innerHTML = `<div class="boot-card">
-    <span class="brand-logo brand-logo--big" alt="" aria-hidden="true">
+    <img src="icons/icon.svg" class="brand-logo brand-logo--big" alt="" aria-hidden="true">
     <h2 style="margin-top:14px;font-size:18px">No se pudo conectar</h2>
     <p>${esc(message || 'Comprueba que el servidor esté en marcha y vuelve a intentarlo.')}</p>
     <button class="btn btn-primary" type="button" data-action="retry">Reintentar</button>
@@ -4829,7 +4829,7 @@ function viewOnboarding() {
   }
   return `<section class="onboarding">
     <div class="ob-card">
-      <div class="ob-top"><span class="brand-logo" alt="" aria-hidden="true"><div class="ob-dots">${dots}</div></div>
+      <div class="ob-top"><img src="icons/icon.svg" class="brand-logo" alt="" aria-hidden="true"><div class="ob-dots">${dots}</div></div>
       ${body}
       <div class="ob-foot">
         ${ob.step > 0 ? `<button type="button" class="btn btn-ghost" data-action="ob-back">${icon('arrowLeft', 16)} Atrás</button>` : '<span></span>'}
