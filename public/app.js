@@ -1,4 +1,4 @@
-/* Mi Cartera — aplicación (sin dependencias) */
+/* NÓVORA — aplicación (sin dependencias) */
 'use strict';
 import * as F from './fiscal.js';
 import { GLYPHS, glyphSVG, normalizeGlyph } from './glyphs.js';
@@ -569,7 +569,7 @@ function showBootError(message) {
   boot.hidden = false;
   boot.classList.add('error');
   boot.innerHTML = `<div class="boot-card">
-    <span class="brand-mark brand-mark--big" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="brand-logo brand-logo--big" alt="" aria-hidden="true">
     <h2 style="margin-top:14px;font-size:18px">No se pudo conectar</h2>
     <p>${esc(message || 'Comprueba que el servidor esté en marcha y vuelve a intentarlo.')}</p>
     <button class="btn btn-primary" type="button" data-action="retry">Reintentar</button>
@@ -1929,7 +1929,7 @@ function viewMas() {
   const primary = window.matchMedia('(min-width: 981px)').matches ? ['resumen', 'movimientos', 'cuentas'] : bottom;
   const visible = items.filter((it) => viewEnabled(it.id) && !primary.includes(it.id));
   return `
-  <div class="viewhead"><div><h1>Más</h1><p>Todas las secciones de Mi Cartera.</p></div></div>
+  <div class="viewhead"><div><h1>Más</h1><p>Todas las secciones de NÓVORA.</p></div></div>
   <div class="more-grid">${visible.map((it) => `<a class="card more-item" href="#/${it.id}">
     <span class="more-icon">${icon(it.icon, 20)}</span>
     <span class="more-text"><b>${esc(it.title)}</b><span>${esc(it.text)}</span></span>
@@ -1971,7 +1971,7 @@ function viewAjustes() {
     ${settingsProfileHTML()}
     <section class="card setting-card">
       <h2>Apariencia y moneda</h2>
-      <p>Así se ve Mi Cartera en este dispositivo.</p>
+      <p>Así se ve NÓVORA en este dispositivo.</p>
       <div class="setting-row">
         <div><h3>Tema</h3><p>Claro, oscuro o el que use tu sistema.</p></div>
         <div class="seg" role="group" aria-label="Tema">
@@ -2034,7 +2034,7 @@ function viewAjustes() {
 
     <section class="card setting-card">
       <h2>Tus dispositivos</h2>
-      <p>Usa Mi Cartera en el móvil, en otro ordenador o en ambos, sin subir tus datos a ninguna nube.</p>
+      <p>Usa NÓVORA en el móvil, en otro ordenador o en ambos, sin subir tus datos a ninguna nube.</p>
       <div class="setting-row">
         <div><h3>Abrir en el móvil</h3><p>${WEB ? 'Código QR de esta página.' : 'Dirección y código QR para entrar desde el móvil con la misma Wi-Fi.'}</p></div>
         <button class="btn btn-ghost btn-sm" type="button" data-action="phone">${icon('phone', 14)} Ver código</button>
@@ -2551,7 +2551,7 @@ function openInvestmentModal(investment = null) {
   const isMarket = () => MARKET_TYPES.includes(type);
   openSheet({
     title: investment ? 'Editar inversión' : 'Nueva inversión',
-    subtitle: 'Búscala en el mercado y Mi Cartera usará su precio real.',
+    subtitle: 'Búscala en el mercado y NÓVORA usará su precio real.',
     submitLabel: investment ? 'Guardar cambios' : 'Crear inversión',
     dangerLabel: investment ? 'Eliminar' : '',
     body: `
@@ -3382,7 +3382,7 @@ async function importFile(file) {
   }
   const data = parsed?.data?.accounts ? parsed.data : parsed;
   if (!data || !Array.isArray(data.accounts) || !Array.isArray(data.transactions)) {
-    throw new Error('El archivo no parece una copia de Mi Cartera.');
+    throw new Error('El archivo no parece una copia de NÓVORA.');
   }
   const ok = await confirmDialog({
     title: 'Importar copia',
@@ -4134,7 +4134,7 @@ async function sealSync(passphrase) {
   return { app: 'mi-cartera', kind: 'sync', v: 1, kdf: 'PBKDF2-SHA256', iter: SYNC_ITER, salt: b64.encode(salt), iv: b64.encode(iv), data: b64.encode(data), createdAt: new Date().toISOString() };
 }
 async function openSync(passphrase, pkg) {
-  if (!pkg || pkg.app !== 'mi-cartera' || pkg.v !== 1) throw new Error('El archivo no es un paquete de Mi Cartera.');
+  if (!pkg || pkg.app !== 'mi-cartera' || pkg.v !== 1) throw new Error('El archivo no es un paquete de NÓVORA.');
   if (!hasWebCrypto()) return (await api('POST', 'api/sync/open', { passphrase, package: pkg })).data;
   try {
     const key = await deriveKey(passphrase, b64.decode(pkg.salt), Number(pkg.iter) || SYNC_ITER);
@@ -4548,7 +4548,7 @@ async function forceUpdate() {
 function showPendingUpdate(registration, worker) {
   if (document.getElementById('updatePrompt')) return;
   let release = {
-    title: 'Actualización de Mi Cartera',
+    title: 'Actualización de NÓVORA',
     notes: ['Detección de nuevas versiones en segundo plano más fiable.', 'Ahora puedes consultar las mejoras antes de instalar.', 'La aplicación solo se recargará cuando pulses «Actualizar ahora».', 'Tus datos guardados y tu sesión se conservan.']
   };
   fetch(new URL('update-info.json', registration.scope), { cache: 'no-store' })
@@ -4562,7 +4562,7 @@ function showPendingUpdate(registration, worker) {
       const overlay = document.createElement('div');
       overlay.id = 'updatePrompt';
       overlay.className = 'update-prompt-backdrop';
-      overlay.innerHTML = '<section class="update-prompt" role="dialog" aria-modal="true" aria-labelledby="updatePromptTitle"><div class="update-prompt-mark">↻</div><p class="update-prompt-eyebrow">NUEVA VERSIÓN DISPONIBLE</p><h2 id="updatePromptTitle"></h2><p class="update-prompt-copy">Hemos preparado mejoras para Mi Cartera:</p><ul class="update-prompt-notes"></ul><p class="update-prompt-foot">Puedes seguir ahora y actualizar cuando quieras. Tus datos guardados no se borran.</p><div class="update-prompt-actions"><button type="button" class="btn btn-ghost update-later">Más tarde</button><button type="button" class="btn btn-primary update-now">Actualizar ahora</button></div></section>';
+      overlay.innerHTML = '<section class="update-prompt" role="dialog" aria-modal="true" aria-labelledby="updatePromptTitle"><div class="update-prompt-mark">↻</div><p class="update-prompt-eyebrow">NUEVA VERSIÓN DISPONIBLE</p><h2 id="updatePromptTitle"></h2><p class="update-prompt-copy">Hemos preparado mejoras para NÓVORA:</p><ul class="update-prompt-notes"></ul><p class="update-prompt-foot">Puedes seguir ahora y actualizar cuando quieras. Tus datos guardados no se borran.</p><div class="update-prompt-actions"><button type="button" class="btn btn-ghost update-later">Más tarde</button><button type="button" class="btn btn-primary update-now">Actualizar ahora</button></div></section>';
       overlay.querySelector('h2').textContent = release.title;
       const list = overlay.querySelector('.update-prompt-notes');
       release.notes.forEach((note) => { const li = document.createElement('li'); li.textContent = note; list.append(li); });
@@ -4596,7 +4596,7 @@ function setupServiceWorker() {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController || reloading) return;
     reloading = true;
-    toast('Actualización instalada. Recargando Mi Cartera…');
+    toast('Actualización instalada. Recargando NÓVORA…');
     // El navegador conserva localStorage e IndexedDB; no se borran datos ni sesiones.
     setTimeout(() => location.reload(), 700);
   });
@@ -4775,7 +4775,7 @@ function viewOnboarding() {
   const dots = steps.map((s, i) => `<i class="${i <= ob.step ? 'on' : ''}"></i>`).join('');
   let body = '';
   if (step === 'perfil') {
-    body = `<h1>Bienvenido a Mi Cartera</h1>
+    body = `<h1>Bienvenido a NÓVORA</h1>
       <p class="ob-lead">Tu gestoría privada: facturas con IVA e IRPF, impuestos trimestrales y cuota de autónomos, sin subir tus datos a ninguna nube. ¿Para qué la vas a usar?</p>
       <div class="ob-choices">${Object.entries(PROFILE_LABELS).map(([k, p]) => `<button type="button" class="ob-choice${ob.profile === k ? ' active' : ''}" data-action="ob-profile" data-value="${k}">
         <span class="more-icon">${icon(p.icon, 20)}</span><span><b>${esc(p.title)}</b><span>${esc(p.text)}</span></span></button>`).join('')}</div>`;
@@ -4829,7 +4829,7 @@ function viewOnboarding() {
   }
   return `<section class="onboarding">
     <div class="ob-card">
-      <div class="ob-top"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div class="ob-dots">${dots}</div></div>
+      <div class="ob-top"><span class="brand-logo" alt="" aria-hidden="true"><div class="ob-dots">${dots}</div></div>
       ${body}
       <div class="ob-foot">
         ${ob.step > 0 ? `<button type="button" class="btn btn-ghost" data-action="ob-back">${icon('arrowLeft', 16)} Atrás</button>` : '<span></span>'}
@@ -4987,9 +4987,9 @@ function viewFacturas() {
           <td class="hide-m"><span class="badge ${st.cls}">${st.label}</span></td>
         </tr>`;
       }).join('')}</tbody></table></div>`
-      : `<div class="empty"><span class="empty-icon">${icon('receipt', 24)}</span><h3>${all.length ? 'Nada en este filtro' : 'Aún no has hecho facturas'}</h3><p>Crea un cliente y tu primera factura: Mi Cartera aplica el IVA, la retención y la numeración por ti.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-invoice">Nueva factura</button></div>`}
+      : `<div class="empty"><span class="empty-icon">${icon('receipt', 24)}</span><h3>${all.length ? 'Nada en este filtro' : 'Aún no has hecho facturas'}</h3><p>Crea un cliente y tu primera factura: NÓVORA aplica el IVA, la retención y la numeración por ti.</p><button class="btn btn-primary btn-sm" type="button" data-action="new-invoice">Nueva factura</button></div>`}
   </section>
-  <p class="tiny legal-note">Las facturas cumplen el contenido del Reglamento de facturación (RD 1619/2012). Mi Cartera no es todavía un sistema certificado Verifactu: consulta la sección Impuestos.</p>`;
+  <p class="tiny legal-note">Las facturas cumplen el contenido del Reglamento de facturación (RD 1619/2012). NÓVORA no es todavía un sistema certificado Verifactu: consulta la sección Impuestos.</p>`;
 }
 
 function clientOptions(selected) {
@@ -5524,7 +5524,7 @@ function viewImpuestos() {
       <div class="card-head"><div><h2>Verifactu y factura electrónica</h2><p>Lo que viene en la facturación</p></div></div>
       <p class="card-text"><b>Verifactu (sistemas de facturación).</b> El RD 1007/2023, modificado por el Real Decreto-ley 15/2025, exige que los programas de facturación generen registros con huella encadenada y un código QR. El plazo publicado es el <b>1 de enero de 2027</b> para sociedades del Impuesto sobre Sociedades y el <b>1 de julio de 2027</b> para autónomos e IRPF. En octubre de 2026 Hacienda anunció su intención de ampliar el plazo, pero mientras no se publique en el BOE sigue vigente el calendario anterior.</p>
       <p class="card-text"><b>Factura electrónica B2B (SPFE).</b> Es una obligación distinta, regulada por el RD 238/2026 y la Orden HAC/1028/2026. Será exigible el <b>6 de octubre de 2027</b> para empresas con más de 8 millones de euros de volumen de operaciones y el <b>6 de octubre de 2028</b> para el resto, con fases posteriores para el reporte de estados y pagos. No sustituye a Verifactu: son dos obligaciones que se acumulan.</p>
-      <p class="card-text">Mi Cartera numera de forma correlativa y no permite modificar ni borrar facturas emitidas, pero <b>todavía no es un sistema Verifactu certificado ni emite facturas electrónicas B2B</b>. No afirmamos que cumpla ninguna de esas obligaciones.</p>
+      <p class="card-text">NÓVORA numera de forma correlativa y no permite modificar ni borrar facturas emitidas, pero <b>todavía no es un sistema Verifactu certificado ni emite facturas electrónicas B2B</b>. No afirmamos que cumpla ninguna de esas obligaciones.</p>
     </section>
   </div>
   <p class="tiny legal-note">Cálculos orientativos para estimación directa simplificada en territorio común. No sustituyen a un asesor fiscal ni a la presentación oficial en la sede de la Agencia Tributaria.</p>`;

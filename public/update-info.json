@@ -1,11 +1,10 @@
 {
-  "version": "2026.11.04.2",
-  "title": "Actualización del sistema de actualizaciones",
+  "version": "2026.11.05.1",
+  "title": "NÓVORA: nueva identidad de marca",
   "notes": [
-    "La comprobación de nuevas versiones se realiza en segundo plano y se reintenta al recuperar conexión o volver a la aplicación.",
-    "Ahora aparece un aviso con el resumen de cambios y puedes elegir cuándo instalar.",
-    "La aplicación ya no se recarga sin avisar: solo se actualiza cuando pulsas «Actualizar ahora».",
-    "Si la descarga de una versión está incompleta, se mantiene activa la versión anterior.",
-    "Tus datos guardados y tu sesión se conservan durante la actualización."
+    "Mi Cartera pasa a llamarse NÓVORA.",
+    "Nueva identidad visual con el símbolo geométrico de la marca.",
+    "Nuevo lema: Tu gestoría de confianza.",
+    "Tus datos y funciones existentes se mantienen."
   ]
 }

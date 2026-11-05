@@ -1,8 +1,8 @@
 {
   "name": "mi-cartera",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "private": true,
-  "description": "Gestoría privada para autónomos y particulares en España: facturas con IVA e IRPF, modelos 303 y 130, cuota de autónomos y finanzas personales. 100% local.",
+  "description": "NÓVORA — Tu gestoría de confianza. Gestión fiscal, financiera y empresarial.",
   "type": "module",
   "scripts": {
     "start": "node server.js",

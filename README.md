@@ -1,6 +1,6 @@
-# Mi Cartera
+# NÓVORA
 
-**Gestoría privada para autónomos y particulares en España.** Facturas con IVA e IRPF, modelos 303 y 130, cuota de autónomos y tus finanzas personales en una sola app **100 % local**: sin cuentas, sin anuncios, sin nube y sin dependencias externas (solo Node.js).
+**Tu gestoría de confianza.** Gestión fiscal, financiera y empresarial para autónomos y particulares. Facturas con IVA e IRPF, modelos 303 y 130, cuota de autónomos y tus finanzas personales en una sola app **100 % local**: sin cuentas, sin anuncios, sin nube y sin dependencias externas (solo Node.js).
 
 ## Para quién es
 
@@ -46,7 +46,7 @@ Requisito: [Node.js](https://nodejs.org) 20 o superior (probado con Node 24).
 node server.js
 ```
 
-Se abre el navegador en `http://localhost:4321`. Si ya tenías Mi Cartera abierta, simplemente te la vuelve a abrir; si otro programa usa ese puerto, prueba sola con el 4322, 4323… Para detenerlo, `Ctrl+C` o cierra la ventana.
+Se abre el navegador en `http://localhost:4321`. Si ya tenías NÓVORA abierta, simplemente te la vuelve a abrir; si otro programa usa ese puerto, prueba sola con el 4322, 4323… Para detenerlo, `Ctrl+C` o cierra la ventana.
 
 > No hace falta `npm install`. La app no usa paquetes externos.
 
@@ -152,7 +152,7 @@ Están en `public/fiscal.js`, sin dependencias, y sirven para **estimación dire
 
 Las tablas de cotización son las de la Orden PJC/297/2026 (BOE-A-2026-7296), verificadas contra el texto oficial. Para actualizarlas, sigue `docs/ACTUALIZACION-NORMATIVA-FISCAL.md`; las reglas y tablas deben revisarse y versionarse por ejercicio, no sobrescribirse sin pruebas.
 
-> **Verifactu (SIF) y factura electrónica B2B son obligaciones distintas.** El RD 1007/2023, modificado por el Real Decreto-ley 15/2025, fija el 1 de enero de 2027 para sociedades del Impuesto sobre Sociedades y el 1 de julio de 2027 para autónomos e IRPF. En octubre de 2026 Hacienda anunció su intención de ampliar el plazo, pero **mientras no se publique en el BOE sigue vigente el calendario anterior**. La factura electrónica B2B (RD 238/2026 y Orden HAC/1028/2026) será exigible el 6 de octubre de 2027 para grandes empresas y el 6 de octubre de 2028 para el resto. Mi Cartera **no es un sistema Verifactu certificado ni emite facturas electrónicas B2B**: solo cumple el contenido del Reglamento de facturación (RD 1619/2012) y conserva la numeración y la inmutabilidad de las facturas emitidas.
+> **Verifactu (SIF) y factura electrónica B2B son obligaciones distintas.** El RD 1007/2023, modificado por el Real Decreto-ley 15/2025, fija el 1 de enero de 2027 para sociedades del Impuesto sobre Sociedades y el 1 de julio de 2027 para autónomos e IRPF. En octubre de 2026 Hacienda anunció su intención de ampliar el plazo, pero **mientras no se publique en el BOE sigue vigente el calendario anterior**. La factura electrónica B2B (RD 238/2026 y Orden HAC/1028/2026) será exigible el 6 de octubre de 2027 para grandes empresas y el 6 de octubre de 2028 para el resto. NÓVORA **no es un sistema Verifactu certificado ni emite facturas electrónicas B2B**: solo cumple el contenido del Reglamento de facturación (RD 1619/2012) y conserva la numeración y la inmutabilidad de las facturas emitidas.
 
 ## Estructura
 
@@ -179,7 +179,7 @@ data/backups/          copias diarias
 
 Los que antes había que resolver a mano ya los resuelve la app:
 
-- **El puerto 4321 está ocupado**: si es otra Mi Cartera, la app te la abre; si es otro programa, usa sola el siguiente puerto libre (4322, 4323…). Para fijar uno: `set PORT=4400 && node server.js`.
+- **El puerto 4321 está ocupado**: si es otra NÓVORA, la app te la abre; si es otro programa, usa sola el siguiente puerto libre (4322, 4323…). Para fijar uno: `set PORT=4400 && node server.js`.
 - **El móvil no entra**: **Ajustes → Abrir en el móvil** muestra la dirección correcta con código QR y los pasos. En Windows, ejecuta una vez `permitir-movil.bat` y marca tu Wi-Fi como red privada.
 - **El navegador muestra datos antiguos**: el service worker ya no reutiliza archivos guardados por el navegador, la app detecta si el servidor tiene una versión más nueva y se recarga sola, y los datos se refrescan al volver a la pestaña. Si aun así ves algo raro: **Ajustes → Forzar actualización**.
 - **Restaurar una copia**: **Ajustes → Datos → Copias automáticas → Restaurar**. Antes se guarda una copia de lo que tienes ahora, así que se puede deshacer.

@@ -1,6 +1,6 @@
 // Service worker: caché primero para el shell estático y red primero para recursos dinámicos.
 // Cada publicación incrementa CACHE; la instalación precarga el shell actualizado antes de activarlo.
-const CACHE = 'micartera-v18';
+const CACHE = 'novora-v19';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'fiscal.js', 'glyphs.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'fonts/inter-latin.woff2', 'vendor/qrcode.js'];
 const SHELL_URLS = new Set(SHELL.map((path) => new URL(path, self.registration.scope).href));
 

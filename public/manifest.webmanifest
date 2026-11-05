@@ -1,18 +1,20 @@
 {
-  "name": "Mi Cartera · Gestoría privada para autónomos",
-  "short_name": "Mi Cartera",
-  "description": "Facturas, IVA, IRPF, cuota de autónomos y finanzas personales. 100% local, sin nube.",
+  "name": "NÓVORA · Tu gestoría de confianza",
+  "short_name": "NÓVORA",
+  "description": "Gestión fiscal, financiera y empresarial con una experiencia clara y cercana.",
   "lang": "es",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#f4f4f2",
-  "theme_color": "#f4f4f2",
+  "theme_color": "#111111",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
   ]
 }
