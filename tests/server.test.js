@@ -116,6 +116,13 @@ test('bloquea Host y Origin ajenos y los cuerpos que no son JSON', async () => {
   });
   assert.equal(foreignOrigin.status, 403);
 
+  // Un origen en otro puerto del mismo host también es otro origen.
+  const foreignPort = await request({
+    method: 'POST', path: '/api/clients', headers: { Origin: `http://localhost:${port + 1}` },
+    body: { name: 'Atacante desde otro puerto' }
+  });
+  assert.equal(foreignPort.status, 403);
+
   const plain = await request({
     method: 'POST', path: '/api/clients', headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({ name: 'Formulario' })
@@ -367,6 +374,8 @@ test('el PIN bloquea la API y la sesión lo desbloquea', async () => {
   assert.equal(enabled.status, 200);
   const loginCookie = cookieOf(enabled);
   assert.match(loginCookie, /^mc_session=/);
+  assert.match(enabled.headers['set-cookie'][0], /HttpOnly/);
+  assert.match(enabled.headers['set-cookie'][0], /SameSite=Strict/);
 
   const locked = await request({ path: '/api/state' });
   assert.equal(locked.status, 401);
