@@ -5507,7 +5507,7 @@ function viewImpuestos() {
           <tr><td>Retenciones que te han hecho</td><td>06</td><td>${m130.retenciones ? '−' : ''}${fm(m130.retenciones)}</td></tr>
           <tr class="row-total"><td>Resultado</td><td>07</td><td>${fm(m130.bruto)}</td></tr>
         </tbody></table></div>
-      ${exento130 ? `<p class="tiny tax-hint">${icon('check', 13)} El ${esc(percent(m130.pctRetencion, 0))} de tus ingresos ya lleva retención. La exención solo se aplica a actividades profesionales cuando al menos el 70 % de sus ingresos del año anterior (o del período de inicio) tuvieron retención. Base: ${esc(exencion.basis)}.</p>` : ''}
+      ${exento130 ? `<p class="tiny tax-hint">${icon('check', 13)} El ${esc(percent(exencion.ratio, 0))} de tus ingresos ya lleva retención. La exención solo se aplica a actividades profesionales cuando al menos el 70 % de sus ingresos del año anterior (o del período de inicio) tuvieron retención. Base: ${esc(exencion.basis)}.</p>` : ''}
     </section>
   </div>
   <div class="grid-2">
