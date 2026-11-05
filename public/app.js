@@ -4727,7 +4727,7 @@ function retaMonthlyNow() {
 }
 function taxOpts() {
   const b = biz();
-  return { retaMonthly: retaMonthlyNow(), startDate: b.startDate || '', endDate: b.endDate || '', regime: b.taxRegime, uniqueClientReduction: b.uniqueClientReduction, difficultRate: b.territory === 'ceutamelilla' && F.FISCAL_YEAR === 2026 ? 0.10 : 0.05, activity: b.activity };
+  return { retaMonthly: retaMonthlyNow(), startDate: b.startDate || '', endDate: b.endDate || '', regime: b.taxRegime, uniqueClientReduction: b.uniqueClientReduction, difficultRate: b.taxTerritory === 'ceuta' && F.FISCAL_YEAR === 2026 ? 0.10 : 0.05, activity: b.activity };
 }
 function quarterLabel(year, q) { return `${q}T ${year}`; }
 function deadlineText(year, q) {
