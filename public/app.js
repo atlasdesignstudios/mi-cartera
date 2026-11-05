@@ -533,18 +533,6 @@ window.addEventListener('hashchange', () => {
   window.scrollTo({ top: 0, behavior: 'instant' });
 });
 
-// Navegación explícita: evita que los enlaces internos dependan únicamente del hash del navegador.
-document.addEventListener('click', (event) => {
-  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  const link = event.target.closest('a[href^="#/"]');
-  if (!link || link.target === '_blank') return;
-  const route = link.getAttribute('href').slice(2).split('?')[0];
-  if (!ROUTES.includes(route) || !viewEnabled(route)) return;
-  event.preventDefault();
-  const nextHash = `#/${route}`;
-  if (location.hash === nextHash) render();
-  else location.hash = nextHash;
-});
 
 /* ---------------------------------------------------------------- arranque / bloqueo */
 function hideBoot() {
