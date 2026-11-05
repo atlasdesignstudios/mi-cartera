@@ -498,7 +498,8 @@ function updateNav(view) {
   for (const link of $$('[data-nav]')) {
     const id = link.dataset.nav;
     const isBottom = Boolean(link.closest('.bottomnav'));
-    const active = id === view || (isBottom && id === 'mas' && moreViews().includes(view) && !bottomNavItems().includes(view));
+    const desktop = window.matchMedia('(min-width: 981px)').matches;
+    const active = id === view || (id === 'mas' && (desktop ? !['resumen', 'movimientos', 'cuentas'].includes(view) : isBottom && moreViews().includes(view) && !bottomNavItems().includes(view)));
     link.classList.toggle('active', active);
     if (active) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
