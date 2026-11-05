@@ -546,7 +546,7 @@ function showApp() {
     const chip = document.querySelector('.local-chip');
     if (chip) chip.innerHTML = '<span class="pulse"></span> Datos solo en este navegador';
     const foot = [...document.querySelectorAll('span')].find((el) => el.textContent.includes('tus datos no salen de tu ordenador'));
-    if (foot) foot.textContent = 'Mi Cartera · versión web · tus datos no salen de este navegador';
+    if (foot) foot.textContent = 'Versión web · datos guardados en este navegador; el PIN no los cifra';
   }
 }
 function showLock() {
