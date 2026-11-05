@@ -1933,6 +1933,7 @@ function viewMas() {
     { id: 'recurrentes', icon: 'repeat', title: 'Recurrentes', text: (store.data.recurring || []).length ? `${money(totals.expense, { decimals: 0 })} fijos al mes` : 'Automatiza nómina y recibos' },
     { id: 'objetivos', icon: 'flag', title: 'Objetivos', text: goals.length ? `${goals.length} objetivos · ${goals.filter((g) => g.reached).length} conseguidos` : 'Ahorra con propósito' },
     { id: 'prestamos', icon: 'bank', title: 'Préstamos', text: (store.data.loans || []).length ? `${(store.data.loans || []).length} · ${money(totalDebt(), { decimals: 0 })} pendientes` : 'Hipotecas y préstamos' },
+    { id: 'inversiones', icon: 'trend', title: 'Inversiones', text: 'Consulta tu cartera y su evolución' },
     { id: 'informes', icon: 'chart', title: 'Informes', text: 'Tu año en números' },
     { id: 'ajustes', icon: 'settings', title: 'Ajustes', text: 'Perfil, secciones, negocio, PIN y copias' }
   ];
