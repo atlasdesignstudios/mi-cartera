@@ -4727,17 +4727,18 @@ function retaMonthlyNow() {
 }
 function taxOpts() {
   const b = biz();
-  return { retaMonthly: retaMonthlyNow(), startDate: b.startDate || '', endDate: b.endDate || '' };
+  return { retaMonthly: retaMonthlyNow(), startDate: b.startDate || '', endDate: b.endDate || '', regime: b.taxRegime, uniqueClientReduction: b.uniqueClientReduction, difficultRate: b.territory === 'ceutamelilla' && F.FISCAL_YEAR === 2026 ? 0.10 : 0.05, activity: b.activity };
 }
 function quarterLabel(year, q) { return `${q}T ${year}`; }
 function deadlineText(year, q) {
-  const d = F.quarterDeadline(year, q);
+  const d = F.quarterDeadline(year, q, { holidays: biz().holidays || [] });
   return `del ${fmtDate(d.from)} al ${fmtDate(d.to)}`;
 }
 function hacienda(year, q) {
   const m303 = F.modelo303(store.data.invoices, store.data.purchases, year, q);
   const m130 = F.modelo130(store.data.invoices, store.data.purchases, year, q, taxOpts());
-  const exento130 = m130.pctRetencion >= 0.7;
+  const exencion = F.modelo130Exemption(store.data.invoices, year, { activity: biz().activity, startDate: biz().startDate });
+  const exento130 = exencion.exempt;
   return { m303, m130, exento130, total: round(Math.max(0, m303.resultado) + (exento130 ? 0 : m130.resultado)) };
 }
 function businessReady() { const b = biz(); return Boolean(b.name && b.nif && F.validateNif(b.nif).ok); }
@@ -5453,7 +5454,7 @@ function viewImpuestos() {
   const year = ui.taxYear || def.year;
   const q = ui.taxQ || def.q;
   const { m303, m130, exento130 } = hacienda(year, q);
-  const deadlines = F.upcomingDeadlines(todayISO(), { count: 5 });
+  const deadlines = F.upcomingDeadlines(todayISO(), { count: 5, holidays: biz().holidays || [] });
   const d = F.quarterDeadline(year, q);
   const left = daysUntil(d.to);
   const fm = (n) => esc(money(n));
@@ -5499,14 +5500,14 @@ function viewImpuestos() {
         <tbody>
           <tr><td>Ingresos (base de tus facturas)</td><td>01</td><td>${fm(m130.ingresos)}</td></tr>
           <tr><td>Gastos deducibles${m130.retaAuto ? ` <span class="muted">(incluye ${fm(m130.retaAuto)} de cuota de autónomos)</span>` : ''}</td><td>02</td><td>${fm(m130.gastos + m130.dificil)}</td></tr>
-          ${m130.dificil ? `<tr class="row-note"><td colspan="2">· de ellos, 5 % gastos de difícil justificación (máx. 2.000 €/año)</td><td>${fm(m130.dificil)}</td></tr>` : ''}
+          ${m130.dificil ? `<tr class="row-note"><td colspan="2">· de ellos, gastos de difícil justificación (máx. 2.000 €/año)</td><td>${fm(m130.dificil)}</td></tr>` : ''}
           <tr class="row-sub"><td>Rendimiento neto</td><td>03</td><td>${fm(m130.rendimiento)}</td></tr>
           <tr><td>20 % del rendimiento</td><td>04</td><td>${fm(m130.cuota20)}</td></tr>
           <tr><td>Pagos de trimestres anteriores</td><td>05</td><td>${m130.anteriores ? '−' : ''}${fm(m130.anteriores)}</td></tr>
           <tr><td>Retenciones que te han hecho</td><td>06</td><td>${m130.retenciones ? '−' : ''}${fm(m130.retenciones)}</td></tr>
           <tr class="row-total"><td>Resultado</td><td>07</td><td>${fm(m130.bruto)}</td></tr>
         </tbody></table></div>
-      ${exento130 ? `<p class="tiny tax-hint">${icon('check', 13)} El ${esc(percent(m130.pctRetencion, 0))} de tus ingresos ya lleva retención. Si en el año anterior más del 70 % de tus ingresos profesionales tuvieron retención, no estás obligado a presentar el 130 (art. 109 del Reglamento del IRPF).</p>` : ''}
+      ${exento130 ? `<p class="tiny tax-hint">${icon('check', 13)} El ${esc(percent(m130.pctRetencion, 0))} de tus ingresos ya lleva retención. La exención solo se aplica a actividades profesionales cuando al menos el 70 % de sus ingresos del año anterior (o del período de inicio) tuvieron retención. Base: ${esc(exencion.basis)}.</p>` : ''}
     </section>
   </div>
   <div class="grid-2">
@@ -5706,6 +5707,8 @@ function openBusinessModal() {
       </div>
       <label class="checkbox"><input type="checkbox" name="tarifaPlana"${b.tarifaPlana ? ' checked' : ''}> Tengo la tarifa plana de nuevos autónomos</label>
       <label class="checkbox"><input type="checkbox" name="societario"${b.societario ? ' checked' : ''}> Soy autónomo societario (administrador de mi sociedad)</label>
+       <label class="checkbox"><input type="checkbox" name="uniqueClientReduction"${b.uniqueClientReduction ? ' checked' : ''}> Aplico la reducción por autónomo dependiente o cliente único (incompatible con el 5 % de difícil justificación)</label>
+       <div class="field"><span>Festivos autonómicos/locales de tu municipio <span class="hint">(opcional, fechas separadas por comas, AAAA-MM-DD)</span></span><input name="holidays" maxlength="500" value="${esc((b.holidays || []).join(', '))}" placeholder="2026-05-15, 2026-11-09"></div>
       <div class="field"><span>IBAN para cobros <span class="hint">(aparece en la factura)</span></span><input name="iban" maxlength="40" value="${esc(b.iban || '')}" placeholder="ES00 0000 0000 0000 0000 0000"></div>
       <div class="field"><span>Pie de factura <span class="hint">(opcional)</span></span><input name="footer" maxlength="300" value="${esc(b.footer || '')}" placeholder="Ej. Inscrito en el Colegio de… nº …"></div>`,
     async onSubmit(fd) {
@@ -5713,6 +5716,8 @@ function openBusinessModal() {
       for (const [k, v] of fd.entries()) body[k] = v;
       body.tarifaPlana = fd.get('tarifaPlana') === 'on';
       body.societario = fd.get('societario') === 'on';
+      body.uniqueClientReduction = fd.get('uniqueClientReduction') === 'on';
+      body.holidays = String(body.holidays || '').split(',').map((v) => v.trim()).filter(Boolean);
       for (const k of ['ivaRate', 'irpfRate', 'paymentDays', 'retaMonthly']) body[k] = Number(body[k]) || 0;
       await api('PATCH', 'api/settings', { business: body });
       render();
