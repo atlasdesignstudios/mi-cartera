@@ -4737,9 +4737,9 @@ function deadlineText(year, q) {
 function hacienda(year, q) {
   const m303 = F.modelo303(store.data.invoices, store.data.purchases, year, q);
   const m130 = F.modelo130(store.data.invoices, store.data.purchases, year, q, taxOpts());
-  const exencion = F.modelo130Exemption(store.data.invoices, year, { activity: biz().activity, startDate: biz().startDate });
+  const exencion = F.modelo130Exemption(store.data.invoices, year, q, { activity: biz().activity, startDate: biz().startDate });
   const exento130 = exencion.exempt;
-  return { m303, m130, exento130, total: round(Math.max(0, m303.resultado) + (exento130 ? 0 : m130.resultado)) };
+  return { m303, m130, exento130, exencion, total: round(Math.max(0, m303.resultado) + (exento130 ? 0 : m130.resultado)) };
 }
 function businessReady() { const b = biz(); return Boolean(b.name && b.nif && F.validateNif(b.nif).ok); }
 function nifHint(value) {
@@ -5453,7 +5453,7 @@ function viewImpuestos() {
   const def = quarterToFile();
   const year = ui.taxYear || def.year;
   const q = ui.taxQ || def.q;
-  const { m303, m130, exento130 } = hacienda(year, q);
+  const { m303, m130, exento130, exencion } = hacienda(year, q);
   const deadlines = F.upcomingDeadlines(todayISO(), { count: 5, holidays: biz().holidays || [] });
   const d = F.quarterDeadline(year, q);
   const left = daysUntil(d.to);
