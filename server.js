@@ -628,6 +628,7 @@ function sanitizeBusiness(obj = {}, prev = {}) {
     iban: clean(b.iban, 40).toUpperCase().replace(/\s+/g, ' '),
     activity: b.activity === 'empresarial' ? 'empresarial' : 'profesional',
     taxRegime: ['simplificada', 'normal', 'objetiva', 'atribucion', 'desconocido'].includes(b.taxRegime) ? b.taxRegime : 'desconocido',
+    taxTerritory: ['comun', 'ceuta', 'melilla'].includes(b.taxTerritory) ? b.taxTerritory : 'comun',
     uniqueClientReduction: Boolean(b.uniqueClientReduction),
     holidays: [...new Set((Array.isArray(b.holidays) ? b.holidays : []).filter(validDate))].slice(0, 40),
     iae: clean(b.iae, 60),
