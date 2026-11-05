@@ -248,7 +248,7 @@ function createSession() {
   return sid;
 }
 function cookieHeader(sid) {
-  return `mc_session=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(SESSION_MS / 1000)}`;
+  return `mc_session=${sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(SESSION_MS / 1000)}`;
 }
 function readCookie(req, name) {
   const raw = req.headers.cookie || '';
@@ -2113,7 +2113,7 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/logout' && method === 'POST') {
     const sid = readCookie(req, 'mc_session');
     if (sid) sessions.delete(sid);
-    res.setHeader('Set-Cookie', 'mc_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+    res.setHeader('Set-Cookie', 'mc_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
     return json(res, 200, { ok: true });
   }
 
@@ -2188,7 +2188,7 @@ async function handleApi(req, res, pathname) {
       res.setHeader('Set-Cookie', cookieHeader(sid));
     } else {
       db.settings.pinHash = null;
-      res.setHeader('Set-Cookie', 'mc_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+      res.setHeader('Set-Cookie', 'mc_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
     }
     return json(res, 200, commit());
   }
@@ -2496,7 +2496,9 @@ function assertLocalRequest(req) {
   if (origin) {
     let parsed;
     try { parsed = new URL(String(origin)); } catch { throw new HttpError(403, 'Origen no permitido.'); }
-    if (!allowed.has(hostNameOf(parsed.host))) throw new HttpError(403, 'Origen no permitido.');
+    if (!allowed.has(hostNameOf(parsed.host)) || parsed.host.toLowerCase() !== String(req.headers.host || '').toLowerCase()) {
+      throw new HttpError(403, 'Origen no permitido.');
+    }
   }
 }
 /** Solo se aceptan cuerpos JSON: evita CSRF con formularios HTML o text/plain. */
