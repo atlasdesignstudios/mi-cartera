@@ -131,7 +131,8 @@ const store = {
 const ui = {
   filters: { q: '', type: 'all', category: '', account: '', month: '' },
   budgetMonth: '',
-  reportYear: new Date().getFullYear()
+  reportYear: new Date().getFullYear(),
+  txLimit: 10
 };
 
 /* ---------------------------------------------------------------- utilidades */
@@ -1114,8 +1115,9 @@ function renderTxList() {
     </div>`;
     return;
   }
+  const visible = list.slice(0, ui.txLimit || 10);
   const groups = new Map();
-  for (const tx of list) {
+  for (const tx of visible) {
     if (!groups.has(tx.date)) groups.set(tx.date, []);
     groups.get(tx.date).push(tx);
   }
@@ -1125,7 +1127,7 @@ function renderTxList() {
       <div class="dayhead"><h3>${esc(dateLabel(date))}</h3><span class="day-total">${net >= 0 ? '+' : '−'}${esc(money(Math.abs(net)))}</span></div>
       ${txs.map(txRow).join('')}
     </div>`;
-  }).join('')}</div>`;
+  }).join('')}${visible.length < list.length ? `<div class="tx-more"><span>${visible.length} de ${list.length} movimientos</span><button class="btn btn-ghost btn-sm" type="button" data-action="show-more-tx">Ver más ${icon('chevronDown', 14)}</button></div>` : list.length > 10 ? `<div class="tx-more"><span>Mostrando todos los movimientos</span><button class="btn btn-ghost btn-sm" type="button" data-action="show-less-tx">Ver menos ${icon('chevronUp', 14)}</button></div>` : ''}</div>`;
 }
 
 /* ---------------------------------------------------------------- vista: inversiones */
@@ -3628,7 +3630,16 @@ document.addEventListener('click', async (event) => {
         break;
       case 'clear-filters':
         ui.filters = { q: '', type: 'all', category: '', account: '', month: '' };
+        ui.txLimit = 10;
         render();
+        break;
+      case 'show-more-tx':
+        ui.txLimit = (ui.txLimit || 10) + 10;
+        renderTxList();
+        break;
+      case 'show-less-tx':
+        ui.txLimit = 10;
+        renderTxList();
         break;
       default:
         await handleBizAction(action, el);
@@ -3644,6 +3655,7 @@ document.addEventListener('input', (event) => {
   const target = event.target;
   if (target.id === 'txSearch') {
     ui.filters.q = target.value;
+    ui.txLimit = 10;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       if (store.view === 'movimientos' && document.getElementById('txList')) renderTxList();
@@ -3651,6 +3663,7 @@ document.addEventListener('input', (event) => {
   }
   if (target.id === 'txMonth') {
     ui.filters.month = target.value;
+    ui.txLimit = 10;
     if (store.view === 'movimientos' && document.getElementById('txList')) renderTxList();
   }
 });
@@ -3658,9 +3671,9 @@ document.addEventListener('input', (event) => {
 document.addEventListener('change', async (event) => {
   const target = event.target;
   try {
-    if (target.id === 'txTypeFilter') { ui.filters.type = target.value; renderTxList(); }
-    if (target.id === 'txCategoryFilter') { ui.filters.category = target.value; renderTxList(); }
-    if (target.id === 'txAccountFilter') { ui.filters.account = target.value; renderTxList(); }
+    if (target.id === 'txTypeFilter') { ui.filters.type = target.value; ui.txLimit = 10; renderTxList(); }
+    if (target.id === 'txCategoryFilter') { ui.filters.category = target.value; ui.txLimit = 10; renderTxList(); }
+    if (target.id === 'txAccountFilter') { ui.filters.account = target.value; ui.txLimit = 10; renderTxList(); }
     if (target.id === 'txMonth') { ui.filters.month = target.value; renderTxList(); }
     if (target.id === 'currencySelect') {
       const previous = store.data.settings.currency;
