@@ -319,11 +319,19 @@ test('modelo130 solo aplica difícil justificación en estimación directa simpl
 
 test('modelo130Exemption solo exime actividad profesional con 70% retenido en período aplicable', () => {
   const prior = [invoice({ date: '2025-03-01', irpfRate: 15 }), invoice({ id: 'b', date: '2025-04-01', irpfRate: 0 })];
-  assert.equal(modelo130Exemption(prior, 2026, { activity: 'profesional' }).exempt, false);
-  assert.equal(modelo130Exemption([invoice({ date: '2025-03-01', irpfRate: 15 })], 2026, { activity: 'profesional' }).exempt, true);
-  assert.equal(modelo130Exemption([invoice({ date: '2025-03-01', irpfRate: 15 })], 2026, { activity: 'empresarial' }).exempt, false);
+  assert.equal(modelo130Exemption(prior, 2026, 1, { activity: 'profesional' }).exempt, false);
+  assert.equal(modelo130Exemption([invoice({ date: '2025-03-01', irpfRate: 15 })], 2026, 1, { activity: 'profesional' }).exempt, true);
+  assert.equal(modelo130Exemption([invoice({ date: '2025-03-01', irpfRate: 15 })], 2026, 1, { activity: 'empresarial' }).exempt, false);
 });
 
 test('quarterDeadline desplaza también festivos configurados', () => {
   assert.equal(quarterDeadline(2026, 1, { holidays: ['2026-04-20'] }).to, '2026-04-21');
+});
+
+
+test('modelo130Exemption para inicio usa solo el trimestre en curso', () => {
+  const invoices = [invoice({ date: '2026-01-15', irpfRate: 15 }), invoice({ id: 'q2', date: '2026-04-15', irpfRate: 0 })];
+  const result = modelo130Exemption(invoices, 2026, 2, { activity: 'profesional', startDate: '2026-01-01' });
+  assert.equal(result.exempt, false);
+  assert.equal(result.basis, 'año de inicio');
 });
