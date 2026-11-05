@@ -4664,11 +4664,9 @@ const PURCHASE_KIND_INFO = {
   otros: { label: 'Otros gastos', pct: 100 }
 };
 const NAV_GROUPS = [
+  // Mantener a la vista solo los destinos cotidianos; el resto sigue disponible en «Más».
   { label: '', items: ['resumen', 'movimientos', 'cuentas'] },
-  { label: 'Negocio', items: ['facturas', 'clientes', 'gastos', 'impuestos', 'cuota'] },
-  { label: 'Planificar', items: ['presupuestos', 'recurrentes', 'objetivos'] },
-  { label: 'Patrimonio', items: ['inversiones', 'prestamos'] },
-  { label: '', items: ['informes', 'ajustes'] }
+  { label: 'Explorar', items: ['mas'] }
 ];
 const VIEW_MODULE = {
   presupuestos: 'budgets', recurrentes: 'recurring', objetivos: 'goals', inversiones: 'investments',
