@@ -17,7 +17,7 @@
 ## Reglas de seguridad del cálculo (versión 2026)
 
 - El gasto de difícil justificación solo se calcula automáticamente si el usuario confirma **estimación directa simplificada** y no marca la reducción incompatible por autónomo dependiente/cliente único. Si el régimen es desconocido, normal, objetivo o atribución de rentas, el cálculo no aplica el porcentaje.
-- En régimen común se usa el 5 % con límite anual de 2.000 €. En Ceuta durante 2026, la AEAT publica el 10 % con el mismo límite. Las reglas especiales deben revisarse por territorio y ejercicio.
+- En régimen común se usa el 5 % con límite anual de 2.000 €. En Ceuta durante 2026, la AEAT publica el 10 % con el mismo límite. La app distingue Ceuta de Melilla en el perfil fiscal; no se extrapola el porcentaje especial de Ceuta a Melilla.
 - La exoneración del modelo 130 del artículo 109 RIRPF se limita a actividad profesional y al umbral del 70 % de ingresos sujetos a retención: año natural anterior; si se inicia actividad, período trimestral correspondiente. No se extrapola a actividad empresarial.
 - Los plazos trimestrales se desplazan por fines de semana y por los festivos que el usuario haya introducido. La aplicación no incluye una base completa y mantenida de festivos nacionales, autonómicos y locales.
 
