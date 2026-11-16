@@ -1,4 +1,4 @@
-// Mi Cartera · motor fiscal para España (régimen común: península y Baleares).
+// Valis · motor fiscal para España (régimen común: península y Baleares).
 // Funciones puras, sin dependencias: las usan la interfaz, el servidor y la versión web.
 // Fuentes: Ley 37/1992 del IVA, RD 1619/2012 (facturación), RIRPF art. 30 y 110,
 // Orden PJC/297/2026 (cotización 2026) y calendario del contribuyente de la AEAT.

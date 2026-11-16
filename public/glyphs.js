@@ -1,4 +1,4 @@
-/* Mi Cartera — iconos de línea para categorías, objetivos y préstamos (sin emojis).
+/* Valis — iconos de línea para categorías, objetivos y préstamos (sin emojis).
    Lo usan la app y el servidor: el servidor guarda la clave y la app dibuja el SVG. */
 
 export const GLYPHS = {

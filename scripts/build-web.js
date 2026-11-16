@@ -32,7 +32,7 @@ const glyphs = 'const { normalizeGlyph } = (function () {\n' + glyphSrc.replace(
 // Router de la API.
 const router = slice('function collectionById(', 'const server = http.createServer(');
 
-const shim = String.raw`/* Mi Cartera — servidor dentro del navegador (generado por scripts/build-web.js, no editar a mano). */
+const shim = String.raw`/* Valis — servidor dentro del navegador (generado por scripts/build-web.js, no editar a mano). */
 (function () {
 'use strict';
 globalThis.MC_WEB = true;
@@ -318,7 +318,7 @@ fs.writeFileSync(indexPath, html.replace('<script type="module" src="app.js"></s
   '<script src="local-api.js"></script>\n  <script type="module" src="app.js"></script>'), 'utf8');
 
 const swPath = path.join(DIST, 'sw.js');
-const sw = fs.readFileSync(swPath, 'utf8').replace("'app.js',", "'app.js', 'local-api.js',").replace("const CACHE = 'micartera-", "const CACHE = 'micartera-web-");
+const sw = fs.readFileSync(swPath, 'utf8').replace("'app.js',", "'app.js', 'local-api.js',").replace("const CACHE = 'valis-", "const CACHE = 'valis-web-");
 fs.writeFileSync(swPath, sw, 'utf8');
 fs.writeFileSync(path.join(DIST, '.nojekyll'), '');
 

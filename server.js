@@ -1,4 +1,4 @@
-// Mi Cartera — servidor local sin dependencias externas.
+// Valis — servidor local sin dependencias externas.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,7 +18,7 @@ const PORT = Number(process.env.PORT) || 4321;
 // Por defecto escucha en toda la red local para poder abrirla desde el móvil.
 // Con MC_HOST=127.0.0.1 se limita al propio ordenador.
 const LISTEN_HOST = process.env.MC_HOST || '0.0.0.0';
-const VERSION = '1.7.2';
+const VERSION = '1.7.3';
 let LISTEN_PORT = PORT;
 
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -1491,14 +1491,14 @@ function sealPackage(passphrase, data) {
   return { app: 'mi-cartera', kind: 'sync', v: 1, kdf: 'PBKDF2-SHA256', iter: SYNC_ITER, salt: salt.toString('base64'), iv: iv.toString('base64'), data: body.toString('base64'), createdAt: new Date().toISOString() };
 }
 function openPackage(passphrase, pkg) {
-  if (!pkg || pkg.app !== 'mi-cartera' || pkg.v !== 1) throw bad('El archivo no es un paquete de Mi Cartera.');
+  if (!pkg || pkg.app !== 'mi-cartera' || pkg.v !== 1) throw bad('El archivo no es un paquete de Valis.');
   const raw = Buffer.from(String(pkg.data), 'base64');
   const salt = Buffer.from(String(pkg.salt), 'base64');
   const iv = Buffer.from(String(pkg.iv), 'base64');
   // Limita el coste de PBKDF2 que puede imponer un archivo ajeno (evita bloqueos por CPU).
   const iter = Math.max(10000, Math.min(1000000, Math.round(Number(pkg.iter) || SYNC_ITER)));
   if (salt.length < 8 || salt.length > 64 || iv.length !== 12 || raw.length < 32) {
-    throw bad('El archivo no es un paquete de Mi Cartera.');
+    throw bad('El archivo no es un paquete de Valis.');
   }
   try {
     const key = crypto.pbkdf2Sync(String(passphrase || ''), salt, iter, 32, 'sha256');
@@ -1565,7 +1565,7 @@ async function marketFetchJson(url) {
   if (typeof fetch !== 'function') throw new Error('Necesitas Node.js 18 o superior para consultar el mercado.');
   let response;
   try {
-    response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (MiCartera)', Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
+    response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Valis)', Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
   } catch {
     throw Object.assign(new Error('No hay conexión con el servicio de cotizaciones.'), { network: true });
   }
@@ -2494,7 +2494,7 @@ function assertLocalRequest(req) {
   const allowed = allowedHostNames();
   const host = hostNameOf(req.headers.host);
   if (host && !allowed.has(host)) {
-    throw new HttpError(403, 'Acceso bloqueado: abre Mi Cartera desde su dirección local.');
+    throw new HttpError(403, 'Acceso bloqueado: abre Valis desde su dirección local.');
   }
   const origin = req.headers.origin;
   if (origin) {
@@ -2526,8 +2526,8 @@ function openBrowser(url) {
   } catch { /* abrir el navegador es opcional */ }
 }
 
-/** ¿Lo que ocupa el puerto es otra Mi Cartera ya abierta? */
-async function isMiCartera(port) {
+/** ¿Lo que ocupa el puerto es otra copia de Valis ya abierta? */
+async function isValisRunning(port) {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/api/ping`, { signal: AbortSignal.timeout(1500) });
     const body = await response.json();
@@ -2544,9 +2544,9 @@ server.on('error', async (err) => {
     console.error(err);
     process.exit(1);
   }
-  if (await isMiCartera(LISTEN_PORT)) {
+  if (await isValisRunning(LISTEN_PORT)) {
     const url = `http://localhost:${LISTEN_PORT}`;
-    console.log(`\n  Mi Cartera ya está abierta en ${url}. Te la abro en el navegador.\n`);
+    console.log(`\n  Valis ya está abierta en ${url}. Te la abro en el navegador.\n`);
     openBrowser(url);
     setTimeout(() => process.exit(0), 800);
     return;
@@ -2582,7 +2582,7 @@ async function autoRefreshPrices() {
 
 server.listen(LISTEN_PORT, LISTEN_HOST, () => {
   const local = `http://localhost:${LISTEN_PORT}`;
-  console.log('\n  Mi Cartera · finanzas personales 100% locales\n');
+  console.log('\n  Valis · finanzas personales 100% locales\n');
   console.log(`  Ordenador:  ${local}`);
   for (const url of networkInfo().urls) console.log(`  Móvil:      ${url}   (misma Wi-Fi)`);
   console.log(`  Datos:      ${DB_FILE}`);

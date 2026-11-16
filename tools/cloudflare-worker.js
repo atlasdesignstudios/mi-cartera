@@ -1,4 +1,4 @@
-// Intermediario propio para las cotizaciones de la versión web de Mi Cartera.
+// Intermediario propio para las cotizaciones de la versión web de Valis.
 // Despliégalo gratis en Cloudflare Workers (Workers & Pages → Create → Hello World → pega este código)
 // y copia en Ajustes → Cotizaciones la dirección: https://TU-WORKER.workers.dev/?url=
 // Solo reenvía consultas a Yahoo Finance y solo responde a tu página.
@@ -22,7 +22,7 @@ export default {
       return new Response('Destino no permitido', { status: 403, headers: cors });
     }
     const upstream = await fetch(url.toString(), {
-      headers: { 'User-Agent': 'Mozilla/5.0 (MiCartera)', Accept: 'application/json' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Valis)', Accept: 'application/json' },
       cf: { cacheTtl: 60, cacheEverything: true }
     });
     const headers = new Headers(cors);

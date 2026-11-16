@@ -2,7 +2,7 @@
   "name": "mi-cartera",
   "version": "1.8.0",
   "private": true,
-  "description": "NÓVORA — Tu gestoría de confianza. Gestión fiscal, financiera y empresarial.",
+  "description": "Valis — Tu gestoría de confianza. Gestión fiscal, financiera y empresarial.",
   "type": "module",
   "scripts": {
     "start": "node server.js",

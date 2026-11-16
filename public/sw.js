@@ -1,6 +1,6 @@
 // Service worker: caché primero para el shell estático y red primero para recursos dinámicos.
 // Cada publicación incrementa CACHE; la instalación precarga el shell actualizado antes de activarlo.
-const CACHE = 'novora-v19';
+const CACHE = 'valis-v20';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'fiscal.js', 'glyphs.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'fonts/inter-latin.woff2', 'vendor/qrcode.js'];
 const SHELL_URLS = new Set(SHELL.map((path) => new URL(path, self.registration.scope).href));
 
@@ -20,7 +20,7 @@ self.addEventListener('message', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key.startsWith('micartera-') && key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => /^(micartera|novora|valis)-/.test(key) && key !== CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });

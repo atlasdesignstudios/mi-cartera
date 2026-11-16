@@ -29,4 +29,4 @@
 - [BOE](https://www.boe.es/)
 - [Seguridad Social - Import@ss](https://portal.seg-social.gob.es/)
 
-> Mi Cartera ofrece estimaciones y no sustituye la revisión de un asesor ni la comprobación del calendario y de las obligaciones particulares en la sede de la AEAT.
+> Valis ofrece estimaciones y no sustituye la revisión de un asesor ni la comprobación del calendario y de las obligaciones particulares en la sede de la AEAT.
